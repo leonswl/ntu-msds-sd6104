@@ -47,7 +47,7 @@ def discover_fds(df):
         fd_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies and store results
-    fd_set.validate_fd_dependencies(df)
+    fd_set.validate_fd(df)
     console.log(f"There are {len(fd_set)} fds in the dataset.")
 
     # Retrieve all validation results
@@ -74,7 +74,7 @@ def discover_afds(df, error):
         fd_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies and store results
-    fd_set.validate_afd_dependencies(df)
+    fd_set.validate_afd(df)
     console.log(f"There are {len(fd_set)} fds in the dataset.")
 
     # Retrieve all validation results
