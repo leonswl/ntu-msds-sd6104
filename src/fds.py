@@ -89,7 +89,7 @@ class FunctionalDependencySet:
         """Allows iteration over functional dependencies."""
         return iter(self.dependencies)
     
-    def validate_fd_dependencies(self, df, fd_type:str='fd'):
+    def validate_fd(self, df):
         """Validates all functional dependencies in the dataset and stores the results."""
         
 
@@ -122,7 +122,7 @@ class FunctionalDependencySet:
                 console.log(f"FD does not hold: {fd.lhs} -> {fd.rhs}", style="bold white on red")
                 console.log(f"Number of clusters violating FD: {self.validation_results[fd_key]['num_violations']}")
 
-    def validate_afd_dependencies(self, df:pd.DataFrame, error:float=0.05):
+    def validate_afd(self, df:pd.DataFrame, error:float=0.05):
         """Validates all functional dependencies in the dataset and stores the results."""
 
         verifier = desbordante.afd_verification.algorithms.Default()
