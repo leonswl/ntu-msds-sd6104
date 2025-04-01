@@ -1,4 +1,5 @@
 import os
+import argparse
 
 from rich.console import Console
 import pandas as pd
@@ -13,6 +14,71 @@ from src.fds import (
 
 
 console = Console()
+
+
+
+def create_arg_parser():
+    """
+    Creates and returns an argument parser.
+    """
+    # Create the argument parser
+    parser = argparse.ArgumentParser(
+        description="Data preparation software for SD6104."
+    )
+
+    # Argument flag for preprocessing
+    parser.add_argument(
+        '-p',
+        '--preprocess',
+        action='store_false',
+        required=False,
+        help="Specify this flag to perform preprocessing on the dataset."
+    )
+
+    # Argument flag for profilling
+    parser.add_argument(
+        '-s',
+        '--single_profile',
+        action='store_true',
+        required=False,
+        help="Specify this flag to perform single-column profilling."
+    )
+
+    # Argument flag for association rule mining
+    parser.add_argument(
+        '-rm',
+        '--rule_mining',
+        action='store_true',
+        required=False,
+        help="Specify this flag to perform association rule mining."
+    )
+
+    # Argument for functional dependencies
+    parser.add_argument(
+        '-fd',
+        '--func_dependencies',
+        choices=['default', 'approximate'],
+        nargs='?',
+        default=None,
+        required=False,
+        type=str,
+        help="Specify the method for functional dependencies: 'default' or 'approximate'."
+    )
+
+    # Argument for inclusion dependencies
+    parser.add_argument(
+        '-ind',
+        '--ind_dependencies',
+        choices=['default', 'approximate'],
+        nargs='?',
+        default=None,
+        required=False,
+        type=str,
+        help="Specify the method for inclusion dependencies: 'default' or 'approximate'."
+    )
+
+    return parser
+
 
 def load_data():
     file_path = "data/Food_Inspections_20250216.csv"
@@ -88,17 +154,29 @@ def discover_afds(df, error):
     return all_results
 
 
-def main():
+def main(args):
+
+
 
     df = load_data()
 
-    df = preprocess(df)
+    if args.preprocess:
+        df = preprocess(df)
 
-    save_data(df)
+        save_data(df)
 
-    fd_results = discover_fds(df)
+    if args.func_dependencies:
+        fd_results = discover_fds(df)
 
-    afd_results = discover_afds(df=df, error=0.05)
+    if args.ind_dependencies:
+        afd_results = discover_afds(df=df, error=0.05)
 
 if __name__ == "__main__":
-    main()
+
+    parser = create_arg_parser()
+
+    args = parser.parse_args()
+
+    console.log(f"Args: {args}")
+
+    main(args)
