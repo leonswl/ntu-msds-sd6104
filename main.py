@@ -7,9 +7,13 @@ import pandas as pd
 from src.preprocess import preprocess
 from src.fds import (
     convert_fd,
+    convert_ind,
     find_fds,
     find_afds,
-    FunctionalDependencySet
+    find_inds,
+    find_ainds,
+    FunctionalDependencySet,
+    InclusionDependencySet
 )
 
 
@@ -28,9 +32,9 @@ def create_arg_parser():
 
     # Argument flag for preprocessing
     parser.add_argument(
-        '-p',
-        '--preprocess',
-        action='store_false',
+        '-np',
+        '--no-preprocess',
+        action='store_true',
         required=False,
         help="Specify this flag to perform preprocessing on the dataset."
     )
@@ -38,7 +42,7 @@ def create_arg_parser():
     # Argument flag for profilling
     parser.add_argument(
         '-s',
-        '--single_profile',
+        '--single-profile',
         action='store_true',
         required=False,
         help="Specify this flag to perform single-column profilling."
@@ -47,7 +51,7 @@ def create_arg_parser():
     # Argument flag for association rule mining
     parser.add_argument(
         '-rm',
-        '--rule_mining',
+        '--rule-mining',
         action='store_true',
         required=False,
         help="Specify this flag to perform association rule mining."
@@ -56,8 +60,8 @@ def create_arg_parser():
     # Argument for functional dependencies
     parser.add_argument(
         '-fd',
-        '--func_dependencies',
-        choices=['default', 'approximate'],
+        '--func-dependencies',
+        choices=['all', 'default', 'approximate'],
         nargs='?',
         default=None,
         required=False,
@@ -68,8 +72,8 @@ def create_arg_parser():
     # Argument for inclusion dependencies
     parser.add_argument(
         '-ind',
-        '--ind_dependencies',
-        choices=['default', 'approximate'],
+        '--ind-dependencies',
+        choices=['all', 'default', 'approximate'],
         nargs='?',
         default=None,
         required=False,
@@ -153,23 +157,80 @@ def discover_afds(df, error):
 
     return all_results
 
+def run_ind(df):
+    results = find_inds([df, df])
+
+    console.log(f"There are {len(results)} inclusion dependencies using Default algorithm.")
+
+    for ind in results:
+        console.log(ind)
+
+    ind_set = InclusionDependencySet()
+    for result in results:
+        lhs, rhs =  convert_ind(result)
+        ind_set.add_dependency(lhs, rhs)
+
+    # Validate all dependencies
+    ind_set.validate_ind(df)
+
+def run_aind(df, error):
+    results = find_ainds([df,df], error = error)
+
+    console.log(f"There are {len(results)} inclusion dependencies using Default algorithm.")
+
+    for ind in results:
+        console.log(ind)
+
+    ind_set = InclusionDependencySet()
+    for result in results:
+        lhs, rhs =  convert_ind(result)
+        ind_set.add_dependency(lhs, rhs)
+
+    # Validate all dependencies
+    ind_set.validate_aind(df)
 
 def main(args):
 
-
-
     df = load_data()
 
-    if args.preprocess:
+    if not args.no_preprocess:
+        console.log("Running preprocessing on raw file:")
         df = preprocess(df)
 
+        console.log("Persisting preprocessed file:")
         save_data(df)
 
+    ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
-        fd_results = discover_fds(df)
+        if args.func_dependencies == 'default':
+            console.log("Running both Default Functional Dependences:")
+            fd_results = discover_fds(df)
 
+        elif args.func_dependencies == 'approximate':
+            console.log("Running both Approximate Functional Dependences:")
+            afd_results = discover_afds(df=df, error=0.05)
+
+        elif args.func_dependencies == 'all':
+            console.log("Running both Default and Approximate Functional Dependences:")
+            fd_results = discover_fds(df)
+            afd_results = discover_afds(df=df, error=0.05)
+
+    ##### INCLUSION DEPENDENCIES #####
     if args.ind_dependencies:
-        afd_results = discover_afds(df=df, error=0.05)
+
+        if args.ind_dependencies == 'default':
+            console.log("Running the Default Inclusion Dependences:")
+            run_ind(df)
+
+        elif args.ind_dependencies == 'approximate':
+            console.log("Running Approximate Inclusion Dependences")
+            run_aind(df=df, error=0.2)
+
+        elif args.ind_dependencies == 'all':
+            console.log("Running both Default and Approximate Inclusion Dependences:")
+            run_ind(df)
+            run_aind(df=df, error=0.2)
+        
 
 if __name__ == "__main__":
 
