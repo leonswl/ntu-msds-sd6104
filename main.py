@@ -193,12 +193,24 @@ def main(args):
 
     df = load_data()
 
+    ##### PREPROCESSING ##### WANG YU
     if not args.no_preprocess:
         console.log("Running preprocessing on raw file:")
         df = preprocess(df)
 
         console.log("Persisting preprocessed file:")
         save_data(df)
+
+    #### SINGLE PROFILLING ##### SELENE
+    if args.single_profile:
+        # single_profilling()
+        console.log("Running Single Profilling")
+
+
+    #### RULE MINING ##### EUGENE
+    if args.rule_mining:
+        # rule_mining()
+        console.log("Running Rule Mining")
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
