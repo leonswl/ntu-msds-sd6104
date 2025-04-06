@@ -19,8 +19,6 @@ from src.fds import (
 
 console = Console()
 
-print("hahaha")
-
 def create_arg_parser():
     """
     Creates and returns an argument parser.
