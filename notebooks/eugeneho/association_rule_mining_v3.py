@@ -1,3 +1,5 @@
+import time
+
 import pandas as pd
 from mlxtend.preprocessing import TransactionEncoder
 from mlxtend.frequent_patterns import apriori, association_rules
@@ -34,14 +36,19 @@ def run_association_rule_mining(factorized_csv, min_support=0.05, min_confidence
     # -----------------------------------------------------------------------------
     # STEP 3: TRANSFORM TRANSACTIONS INTO ONE-HOT ENCODING
     # -----------------------------------------------------------------------------
+    start_time = time.time()
     te = TransactionEncoder()
-    te_array = te.fit_transform(transactions)
-    transactions_df = pd.DataFrame(te_array, columns=te.columns_)
+    te_array = te.fit(transactions).transform(transactions, sparse=True)
+
+    transactions_df = pd.DataFrame.sparse.from_spmatrix(te_array, columns=te.columns_)
+    elapsed_time = time.time() - start_time
+    print(f"Successfully transformed transactions into one-hot encoding in {elapsed_time:.2f} seconds..")
     
     # -----------------------------------------------------------------------------
     # STEP 4: RUN APRIORI TO FIND FREQUENT ITEMSETS
     # -----------------------------------------------------------------------------
     frequent_itemsets = apriori(transactions_df, min_support=min_support, use_colnames=True)
+    print("Successfully completed apriori rule mining")
     
     # -----------------------------------------------------------------------------
     # STEP 5: EXTRACT ASSOCIATION RULES
@@ -66,5 +73,5 @@ def run_association_rule_mining(factorized_csv, min_support=0.05, min_confidence
 
 # Example usage:
 if __name__ == "__main__":
-    factorized_csv = 'final_assiocation_file_int.csv'
+    factorized_csv = 'notebooks/eugeneho/final_assiocation_file_int.csv'
     run_association_rule_mining(factorized_csv)
