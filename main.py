@@ -271,6 +271,89 @@ def expand_violations(df, save_path=None):
 # df = pd.read_csv("Food_Inspections_20250216.csv")
 # violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
 
+import pandas as pd
+from fuzzywuzzy import process
+
+def fuzzy_clean_columns(df, columns_to_clean, save_path=None, similarity_threshold=95):
+    """
+    Cleans categorical string columns in a DataFrame using fuzzy matching.
+
+    Parameters:
+    - df: pandas DataFrame
+    - columns_to_clean: list of column names to clean
+    - save_path: optional file path to save cleaned DataFrame as CSV
+    - similarity_threshold: similarity score (0–100) for grouping values
+
+    Returns:
+    - cleaned DataFrame with additional *_Cleaned columns
+    - dictionary with grouped original values under each canonical label
+    """
+    all_grouped_labels = {}
+
+    def clean_column_fuzzy(df, column_name):
+        print(f"\n🔍 Processing column: {column_name}")
+        
+        # Step 1: Standardize values
+        df[column_name] = df[column_name].astype(str).str.strip().str.upper()
+
+        # Step 2: Get unique values
+        unique_values = df[column_name].dropna().unique().tolist()
+
+        # Step 3: Fuzzy group
+        grouped_map = {}     # raw -> cleaned
+        grouped_labels = {}  # cleaned -> [originals]
+
+        for value in unique_values:
+            if value in grouped_map:
+                continue
+
+            matches = process.extract(value, unique_values, limit=None)
+            close_matches = [m for m, score in matches if score >= similarity_threshold]
+
+            canonical = close_matches[0]
+
+            for match in close_matches:
+                grouped_map[match] = canonical
+
+            grouped_labels[canonical] = close_matches
+
+        # Step 4: Add new column
+        cleaned_col = f"{column_name} Cleaned"
+        df[cleaned_col] = df[column_name].map(grouped_map)
+
+        # Save grouping for display
+        all_grouped_labels[column_name] = grouped_labels
+
+        return df
+
+    # Apply to all target columns
+    for col in columns_to_clean:
+        df = clean_column_fuzzy(df, col)
+
+    # Optionally save result
+    if save_path:
+        df.to_csv(save_path, index=False)
+        print(f"\n✅ Cleaned data saved as: {save_path}")
+
+    # Automatically print grouped labels
+    print("\n🧾 All Grouped Labels:")
+   # Show grouping results
+    for col, group_map in all_grouped_labels.items():
+        print(f"\n📦 Grouped values for '{col}':")
+        for canonical, group in group_map.items():
+            if len(group) > 1:
+                print(f"\n  → {canonical}:")
+                for g in group:
+                    print(f"     - {g}")
+
+    return df, all_grouped_labels
+
+# Example usage:
+# df = pd.read_csv("Food_Inspections_20250216.csv")
+# columns = ['Facility Type', 'City', 'Inspection Type']
+# cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+
+
 def main(args):
 
     df = load_data()
@@ -278,9 +361,16 @@ def main(args):
     ##### PREPROCESSING ##### WANG YU
     if args.process_violations:
         console.log("Running preprocessing on violations column:")
-        df = expand_violations(df)
-        console.log("Persisting preprocessed file:")
-        save_data(df)
+        violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
+        #onsole.log("Persisting preprocessed file:")
+        #save_data(df)
+
+    if args.fuzzy_clean_columns:
+        console.log("Running fuzzy cleaning:")
+        columns = args.columns if args.columns else []  # fallback if None
+        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+        #console.log("Persisting preprocessed file:")
+        #save_data(df)
 
     #### SINGLE PROFILLING ##### SELENE
     if args.single_profile:
