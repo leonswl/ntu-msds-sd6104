@@ -189,15 +189,96 @@ def run_aind(df, error):
     # Validate all dependencies
     ind_set.validate_aind(df)
 
+def expand_violations(df, save_path=None):
+    """
+    Parses and expands the 'Violations' column in the DataFrame.
+
+    Parameters:
+    - df: pandas DataFrame with a 'Violations' column
+    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
+
+    Returns:
+    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
+    """
+
+import pandas as pd
+import re
+def expand_violations(df, save_path=None):
+    """
+    Parses and expands the 'Violations' column in the DataFrame.
+
+    Parameters:
+    - df: pandas DataFrame with a 'Violations' column
+    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
+
+    Returns:
+    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
+    """
+
+    def extract_violations(row):
+        violation_text = row.get('Violations', '')
+        if pd.isna(violation_text):
+            return []
+
+        parts = [v.strip() for v in violation_text.split('|') if v.strip()]
+        pattern = r"(?P<number>\d+)\.\s+(?P<text>.+?)\s+-\s+Comments:\s+(?P<comment>.+)"
+
+        extracted = []
+        for part in parts:
+            match = re.match(pattern, part)
+            combined = row.drop(labels=['Violations']).to_dict()
+            combined['raw_violation'] = part
+
+            if match:
+                v = match.groupdict()
+                combined['violation_number'] = v['number']
+                combined['violation_text'] = v['text']
+                combined['violation_comment'] = v['comment']
+                combined['parse_error'] = False
+                combined['error_reason'] = ""
+            else:
+                # Attempt to detect error reason
+                if not re.search(r"\d+\.", part):
+                    reason = "missing violation number"
+                elif "Comments:" not in part:
+                    reason = "missing 'Comments:'"
+                else:
+                    reason = "general format mismatch"
+                
+                combined['violation_number'] = None
+                combined['violation_text'] = None
+                combined['violation_comment'] = None
+                combined['parse_error'] = True
+                combined['error_reason'] = reason
+
+            extracted.append(combined)
+        return extracted
+
+    # Apply extraction across all rows
+    expanded_rows = []
+    for _, row in df.iterrows():
+        expanded_rows.extend(extract_violations(row))
+
+    violations_expanded_df = pd.DataFrame(expanded_rows)
+
+    if save_path:
+        violations_expanded_df.to_csv(save_path, index=False)
+        print(f"✅ Done! File saved as: {save_path}")
+
+    return violations_expanded_df
+
+# Example usage:
+# df = pd.read_csv("Food_Inspections_20250216.csv")
+# violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
+
 def main(args):
 
     df = load_data()
 
     ##### PREPROCESSING ##### WANG YU
-    if not args.no_preprocess:
-        console.log("Running preprocessing on raw file:")
-        df = preprocess(df)
-
+    if not args.process_violations:
+        console.log("Running preprocessing on violations column:")
+        df = expand_violations(df)
         console.log("Persisting preprocessed file:")
         save_data(df)
 
