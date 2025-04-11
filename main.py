@@ -271,80 +271,78 @@ def expand_violations(df, save_path=None):
 # df = pd.read_csv("Food_Inspections_20250216.csv")
 # violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
 
-import pandas as pd
-from fuzzywuzzy import process
 
-def fuzzy_clean_columns(df, columns_to_clean, save_path=None, similarity_threshold=95):
+import pandas as pd
+from thefuzz import process, fuzz
+from collections import defaultdict
+
+def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
     """
-    Cleans categorical string columns in a DataFrame using fuzzy matching.
+    Normalizes string columns in a DataFrame using fuzzy matching (via thefuzz).
 
     Parameters:
     - df: pandas DataFrame
-    - columns_to_clean: list of column names to clean
+    - columns_to_clean: list of column names to normalize
+    - threshold: similarity score for fuzzy grouping (default is 80)
     - save_path: optional file path to save cleaned DataFrame as CSV
-    - similarity_threshold: similarity score (0–100) for grouping values
 
     Returns:
-    - cleaned DataFrame with additional *_Cleaned columns
-    - dictionary with grouped original values under each canonical label
+    - df: DataFrame with new *_normalised columns
+    - all_grouped_labels: dictionary mapping canonical → [grouped originals]
     """
     all_grouped_labels = {}
 
-    def clean_column_fuzzy(df, column_name):
+    def fuzzy_normalize_column(df, column_name, threshold=80):
         print(f"\n🔍 Processing column: {column_name}")
         
-        # Step 1: Standardize values
-        df[column_name] = df[column_name].astype(str).str.strip().str.upper()
+        # Ensure strings and clean format
+        df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
 
-        # Step 2: Get unique values
-        unique_values = df[column_name].dropna().unique().tolist()
+        unique_values = list(set(df[column_name]))
 
-        # Step 3: Fuzzy group
-        grouped_map = {}     # raw -> cleaned
-        grouped_labels = {}  # cleaned -> [originals]
+        reference_mapping = {}
+        groups = defaultdict(list)
 
         for value in unique_values:
-            if value in grouped_map:
+            if value in reference_mapping:
                 continue
 
-            matches = process.extract(value, unique_values, limit=None)
-            close_matches = [m for m, score in matches if score >= similarity_threshold]
+            matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
+            matches = [(match, score) for match, score in matches if score >= threshold]
 
-            canonical = close_matches[0]
+            best_match = max(matches, key=lambda x: x[1])[0] if matches else value
 
-            for match in close_matches:
-                grouped_map[match] = canonical
+            for match, score in matches:
+                reference_mapping[match] = best_match
+                groups[best_match].append(match)
 
-            grouped_labels[canonical] = close_matches
+        # Apply mapping
+        normalised_col = f"{column_name}_normalised"
+        df[normalised_col] = df[column_name].map(reference_mapping)
 
-        # Step 4: Add new column
-        cleaned_col = f"{column_name} Cleaned"
-        df[cleaned_col] = df[column_name].map(grouped_map)
-
-        # Save grouping for display
-        all_grouped_labels[column_name] = grouped_labels
+        # Store groups for printing
+        all_grouped_labels[column_name] = dict(groups)
 
         return df
 
-    # Apply to all target columns
+    # Process each column
     for col in columns_to_clean:
-        df = clean_column_fuzzy(df, col)
+        df = fuzzy_normalize_column(df, col, threshold)
 
-    # Optionally save result
+    # Save to CSV if needed
     if save_path:
         df.to_csv(save_path, index=False)
         print(f"\n✅ Cleaned data saved as: {save_path}")
 
-    # Automatically print grouped labels
+    # Print grouped results
     print("\n🧾 All Grouped Labels:")
-   # Show grouping results
     for col, group_map in all_grouped_labels.items():
         print(f"\n📦 Grouped values for '{col}':")
-        for canonical, group in group_map.items():
-            if len(group) > 1:
+        for canonical, originals in group_map.items():
+            if len(originals) > 1:
                 print(f"\n  → {canonical}:")
-                for g in group:
-                    print(f"     - {g}")
+                for original in originals:
+                    print(f"     - {original}")
 
     return df, all_grouped_labels
 
