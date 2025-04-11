@@ -276,7 +276,7 @@ def main(args):
     df = load_data()
 
     ##### PREPROCESSING ##### WANG YU
-    if not args.process_violations:
+    if args.process_violations:
         console.log("Running preprocessing on violations column:")
         df = expand_violations(df)
         console.log("Persisting preprocessed file:")
