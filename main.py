@@ -425,6 +425,119 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
 # columns = ['Facility Type', 'City', 'Inspection Type']
 # cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
 
+import pandas as pd
+from thefuzz import process, fuzz
+from collections import defaultdict
+import re
+
+def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
+    all_grouped_labels = {}
+
+    def contains_numeric_range(value):
+        # Checks if the string contains patterns like 3443-3445
+        return bool(re.search(r'\b\d{1,5}-\d{1,5}\b', value))
+
+    def tokenize_address(value):
+        tokens = value.strip().lower().split()
+        numeric_positions = {}
+        text_tokens = []
+
+        for i, token in enumerate(tokens):
+            if re.fullmatch(r"[#\-]?\d+([a-z]*)?", token):  # Matches 123, -02, 11a, etc.
+                numeric_positions[i] = token
+            else:
+                text_tokens.append(token)
+        
+        return text_tokens, numeric_positions, tokens
+
+    def detokenize_address(text_tokens, numeric_positions):
+        output_tokens = []
+        text_iter = iter(text_tokens)
+        for i in range(max(numeric_positions.keys(), default=-1) + len(text_tokens) + 1):
+            if i in numeric_positions:
+                output_tokens.append(numeric_positions[i])
+            else:
+                try:
+                    output_tokens.append(next(text_iter))
+                except StopIteration:
+                    break
+        return " ".join(output_tokens)
+
+    def fuzzy_normalize_column(df, column_name, threshold=80):
+        print(f"\n🔍 Processing column: {column_name}")
+
+        df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
+
+        # Identify rows to exclude from fuzzy matching
+        df[f"{column_name}_skip_fuzzy"] = df[column_name].apply(contains_numeric_range)
+
+        tokenized = df[column_name].apply(tokenize_address)
+        df[f"{column_name}_text_tokens"] = tokenized.apply(lambda x: x[0])
+        df[f"{column_name}_num_positions"] = tokenized.apply(lambda x: x[1])
+        df[f"{column_name}_orig_tokens"] = tokenized.apply(lambda x: x[2])
+        df[f"{column_name}_text"] = df[f"{column_name}_text_tokens"].apply(lambda x: " ".join(x))
+
+        # Perform fuzzy matching only on rows without numeric ranges
+        mask_fuzzy = ~df[f"{column_name}_skip_fuzzy"]
+        values_to_match = df.loc[mask_fuzzy, f"{column_name}_text"].unique().tolist()
+
+        reference_mapping = {}
+        groups = defaultdict(list)
+
+        for value in values_to_match:
+            if value in reference_mapping:
+                continue
+
+            matches = process.extract(value, values_to_match, limit=10, scorer=fuzz.ratio)
+            matches = [(match, score) for match, score in matches if score >= threshold]
+
+            best_match = max(matches, key=lambda x: x[1])[0] if matches else value
+
+            for match, score in matches:
+                reference_mapping[match] = best_match
+                groups[best_match].append(match)
+
+        all_grouped_labels[column_name] = dict(groups)
+
+        # Map fuzzy results
+        df[f"{column_name}_text_normalised"] = df.apply(
+            lambda row: row[f"{column_name}_text"] if row[f"{column_name}_skip_fuzzy"]
+            else reference_mapping.get(row[f"{column_name}_text"], row[f"{column_name}_text"]),
+            axis=1
+        )
+
+        df[f"{column_name}_text_tokens_normalised"] = df[f"{column_name}_text_normalised"].apply(lambda x: x.split())
+        df[f"{column_name}_normalised"] = df.apply(
+            lambda row: detokenize_address(row[f"{column_name}_text_tokens_normalised"], row[f"{column_name}_num_positions"]),
+            axis=1
+        )
+
+        df.drop(columns=[
+            f"{column_name}_text_tokens", f"{column_name}_num_positions",
+            f"{column_name}_orig_tokens", f"{column_name}_text",
+            f"{column_name}_text_normalised", f"{column_name}_text_tokens_normalised",
+            f"{column_name}_skip_fuzzy"
+        ], inplace=True)
+
+        return df
+
+    for col in columns_to_clean:
+        df = fuzzy_normalize_column(df, col, threshold)
+
+    if save_path:
+        df.to_csv(save_path, index=False)
+        print(f"\n✅ Cleaned data saved as: {save_path}")
+
+    print("\n🧾 All Grouped Labels:")
+    for col, group_map in all_grouped_labels.items():
+        print(f"\n📦 Grouped values for '{col}':")
+        for canonical, originals in group_map.items():
+            if len(originals) > 1:
+                print(f"\n  → {canonical}:")
+                for original in originals:
+                    print(f"     - {original}")
+
+    return df, all_grouped_labels
 def main(args):
 
     df = load_data()
@@ -440,6 +553,13 @@ def main(args):
         console.log("Running fuzzy cleaning:")
         columns = args.columns if args.columns else []  # fallback if None
         cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+        #console.log("Persisting preprocessed file:")
+        #save_data(df)
+
+    if args.fuzzy_clean_address:
+        console.log("Running fuzzy cleaning for address:")
+        columns = args.columns if args.columns else []  # fallback if None
+        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned_address.csv")
         #console.log("Persisting preprocessed file:")
         #save_data(df)
 
