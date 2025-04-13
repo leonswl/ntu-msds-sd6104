@@ -3,6 +3,11 @@ import argparse
 
 from rich.console import Console
 import pandas as pd
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+matplotlib.use("Agg")  
+
 
 from src.preprocess import preprocess
 from src.fds import (
@@ -15,11 +20,11 @@ from src.fds import (
     FunctionalDependencySet,
     InclusionDependencySet
 )
+from src.data_profiler import DataProfiler
+
 
 
 console = Console()
-
-print("hahaha")
 
 def create_arg_parser():
     """
@@ -188,6 +193,76 @@ def run_aind(df, error):
 
     # Validate all dependencies
     ind_set.validate_aind(df)
+
+def single_profiling(
+    df: pd.DataFrame,
+    out_dir: str = "output/profile",     
+    numeric_bins: int = 10,
+    top_n: int = 20,
+    max_text_unique: int = 200,
+) -> None:
+    """
+    • Prints a DataFrame with column‑level metrics (no CSV written)
+    • Saves a first‑digit bar chart for every *numeric* column
+    • Saves two bar charts for every *text* column:
+        - full range  (only if #unique ≤ max_text_unique)
+        - top-N + 'Others'
+    All PNGs land in *out_dir* (created if missing).
+    """
+    
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    profiler = DataProfiler(df)
+
+    # Profile table – print via Rich
+    profile_df = profiler.profile_dataframe(numeric_bins=numeric_bins)
+    console.rule("[bold green]Column‑level profile[/bold green]")
+    console.print(profile_df)
+
+    # Numeric columns – first‑digit plots
+    for col, row in profile_df.iterrows():
+        fd_dist = row.get("first_digit_distribution", {})
+        if isinstance(fd_dist, dict) and fd_dist:
+            plt.figure(figsize=(5, 3))
+            profiler.plot_first_digit(col)
+            plt.savefig(out_path / f"{col}_first_digit.png",
+                        dpi=150, bbox_inches="tight")
+            plt.close()
+            console.log(f"   • First‑digit plot saved for '{col}'")
+
+    # Text columns – frequency plots
+    for col in df.columns:
+        # Skip numeric columns already handled
+        if col in profile_df and profile_df.loc[col].get("first_digit_distribution"):
+            continue
+
+        unique_vals = int(profile_df.loc[col, "distinct_count"])
+        if unique_vals == 0:
+            continue
+
+        # 3a. full‑range plot (only if reasonable)
+        if unique_vals <= max_text_unique:
+            plt.figure(figsize=(max(6, unique_vals * 0.25), 4))
+            profiler.plot_text_frequency(col, top_n=unique_vals, show_pct=False)
+            plt.savefig(out_path / f"{col}_full.png",
+                        dpi=150, bbox_inches="tight")
+            plt.close()
+            console.log(f"   • Full‑range plot saved for '{col}' "
+                        f"({unique_vals} unique values)")
+        else:
+            console.log(
+                f"   • Skipped full‑range plot for '{col}' "
+                f"({unique_vals} unique > {max_text_unique})"
+            )
+
+        # 3b. top‑N (+ Others) plot – always
+        plt.figure(figsize=(10, 4))
+        profiler.plot_text_frequency(col, top_n=top_n, show_pct=False)
+        plt.savefig(out_path / f"{col}_top{top_n}.png",
+                    dpi=150, bbox_inches="tight")
+        plt.close()
+        console.log(f"   • Top‑{top_n} plot saved for '{col}'")
 
 def expand_violations(df, save_path=None):
     """
@@ -370,16 +445,29 @@ def main(args):
         #console.log("Persisting preprocessed file:")
         #save_data(df)
 
-    #### SINGLE PROFILLING ##### SELENE
+    #### SINGLE PROFILLING ##### 
     if args.single_profile:
-        # single_profilling()
+        single_profiling(df)
         console.log("Running Single Profilling")
 
 
     #### RULE MINING ##### EUGENE
     if args.rule_mining:
-        # rule_mining()
         console.log("Running Rule Mining")
+
+        # Safely parse stringified list of column names
+        columns_to_remove = ast.literal_eval(args.columns_to_remove)
+
+        df_factorized, mappings = clean_and_factorize_data(
+            input_csv=args.input_csv,
+            columns_to_remove=columns_to_remove
+        )
+
+        run_efficient_apriori_from_df(
+            df=df_factorized,
+            min_support=args.min_support,
+            min_confidence=args.min_confidence
+        )
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
@@ -416,7 +504,20 @@ def main(args):
 if __name__ == "__main__":
 
     parser = create_arg_parser()
-
+    
+    #Association Mining
+    parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
+    parser.add_argument("--input_csv", type=str,
+                        default='data/Food_Inspections_Violations_Expanded_with_cleandata_address.csv',
+                        help="Path to input CSV file for rule mining")
+    parser.add_argument("--columns_to_remove", type=str,
+                        default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
+                        help="Stringified list of column names to remove")
+    parser.add_argument("--min_support", type=float, default=0.05,
+                        help="Minimum support threshold for rule mining")
+    parser.add_argument("--min_confidence", type=float, default=0.6,
+                        help="Minimum confidence threshold for rule mining")
+    
     args = parser.parse_args()
 
     console.log(f"Args: {args}")
