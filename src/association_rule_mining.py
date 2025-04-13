@@ -1,32 +1,38 @@
+import os
 import pandas as pd
 from efficient_apriori import apriori
 import time
 
-def run_efficient_apriori(factorized_csv, min_support=0.05, min_confidence=0.6,
-                          association_rules_csv='association_rules_output.csv',
-                          frequent_itemsets_csv='frequent_itemsets.csv'):
-    """
-    Loads a factorized CSV file, prepares transactions,
-    runs efficient-apriori, and extracts association rules.
-    """
-    # Load the data
-    df = pd.read_csv(factorized_csv)
+def clean_and_factorize_data(input_csv, columns_to_remove):
+
+    start_time = time.time()
     
-    # STEP 1: PREPARE TRANSACTIONS FROM COLUMN=VALUE STRINGS (like your previous approach)
+    df = pd.read_csv(input_csv)
+    df.drop(columns=columns_to_remove, inplace=True, errors='ignore')
+
+    mappings = {}
+    for col in df.columns:
+        codes, uniques = pd.factorize(df[col])
+        df[col] = codes
+        mappings[col] = dict(enumerate(uniques))
+
+    end_time = time.time()
+    print(f"✅ Factorization complete. Time taken: {end_time - start_time:.2f} seconds.")
+    return df, mappings
+
+def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
     transactions = [
         tuple(f"{col}={row[col]}" for col in df.columns if pd.notna(row[col]))
         for _, row in df.iterrows()
     ]
-    
-    # STEP 2: RUN EFFICIENT-APRIORI
-    print("Running efficient-apriori...")
+
+    print("\n⏳ Running efficient-apriori...")
     start = time.time()
     itemsets, rules = apriori(transactions, min_support=min_support, min_confidence=min_confidence)
     end = time.time()
-    print(f"Apriori completed in {end - start:.2f} seconds.")
-    
-    # STEP 3: FORMAT FREQUENT ITEMSETS INTO A DATAFRAME
-    # itemsets is a dict of dicts: {1: {('a',): 0.5, ...}, 2: {...}, ...}
+    print(f"✅ Apriori completed. Time taken: {end - start:.2f} seconds.")
+
+    # Frequent itemsets
     itemset_rows = []
     for k, itemset_dict in itemsets.items():
         for items, support in itemset_dict.items():
@@ -34,13 +40,11 @@ def run_efficient_apriori(factorized_csv, min_support=0.05, min_confidence=0.6,
                 'itemsets': frozenset(items),
                 'support': support
             })
-    frequent_itemsets_df = pd.DataFrame(itemset_rows)
-    frequent_itemsets_df = frequent_itemsets_df.sort_values(by='support', ascending=False)
-
-    print("Frequent Itemsets (Top 10):")
+    frequent_itemsets_df = pd.DataFrame(itemset_rows).sort_values(by='support', ascending=False)
+    print("\nFrequent Itemsets (Top 10):")
     print(frequent_itemsets_df.head(10))
-    
-    # STEP 4: FORMAT ASSOCIATION RULES INTO A DATAFRAME
+
+    # Association rules
     rules_rows = []
     for rule in rules:
         rules_rows.append({
@@ -50,22 +54,26 @@ def run_efficient_apriori(factorized_csv, min_support=0.05, min_confidence=0.6,
             'confidence': rule.confidence,
             'lift': rule.lift
         })
-    rules_df = pd.DataFrame(rules_rows)
-    rules_df = rules_df.sort_values(by='confidence', ascending=False)
-
+    rules_df = pd.DataFrame(rules_rows).sort_values(by='confidence', ascending=False)
     print("\nAssociation Rules (Top 10 by Confidence):")
     print(rules_df.head(10))
-    
-    # Export CSVs
-    frequent_itemsets_df.to_csv(frequent_itemsets_csv, index=False)
-    rules_df.to_csv(association_rules_csv, index=False)
 
     return frequent_itemsets_df, rules_df
 
-# Example usage
 if __name__ == "__main__":
-    run_efficient_apriori(
-        factorized_csv='notebooks/eugeneho/final_assiocation_file_int.csv',
+    input_csv = '../data/Food_Inspections_Violations_Expanded_with_cleandata_address.csv'
+    columns_to_remove = [
+        'Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 
+        'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 
+        'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State'
+    ]
+    
+    print("🔍 Step 1: Cleaning and Factorizing Data")
+    df_factorized, mappings = clean_and_factorize_data(input_csv, columns_to_remove)
+
+    print("\n🔍 Step 2: Running Association Rule Mining")
+    run_efficient_apriori_from_df(
+        df=df_factorized,
         min_support=0.05,
         min_confidence=0.6
     )

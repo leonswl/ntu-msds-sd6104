@@ -4,6 +4,7 @@ import argparse
 from rich.console import Console
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use("Agg")  
 
@@ -283,8 +284,21 @@ def main(args):
 
     #### RULE MINING ##### EUGENE
     if args.rule_mining:
-        # rule_mining()
         console.log("Running Rule Mining")
+
+        # Safely parse stringified list of column names
+        columns_to_remove = ast.literal_eval(args.columns_to_remove)
+
+        df_factorized, mappings = clean_and_factorize_data(
+            input_csv=args.input_csv,
+            columns_to_remove=columns_to_remove
+        )
+
+        run_efficient_apriori_from_df(
+            df=df_factorized,
+            min_support=args.min_support,
+            min_confidence=args.min_confidence
+        )
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
@@ -321,7 +335,20 @@ def main(args):
 if __name__ == "__main__":
 
     parser = create_arg_parser()
-
+    
+    #Association Mining
+    parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
+    parser.add_argument("--input_csv", type=str,
+                        default='data/Food_Inspections_Violations_Expanded_with_cleandata_address.csv',
+                        help="Path to input CSV file for rule mining")
+    parser.add_argument("--columns_to_remove", type=str,
+                        default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
+                        help="Stringified list of column names to remove")
+    parser.add_argument("--min_support", type=float, default=0.05,
+                        help="Minimum support threshold for rule mining")
+    parser.add_argument("--min_confidence", type=float, default=0.6,
+                        help="Minimum confidence threshold for rule mining")
+    
     args = parser.parse_args()
 
     console.log(f"Args: {args}")
