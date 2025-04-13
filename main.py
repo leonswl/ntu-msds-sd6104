@@ -263,18 +263,185 @@ def single_profiling(
                     dpi=150, bbox_inches="tight")
         plt.close()
         console.log(f"   • Top‑{top_n} plot saved for '{col}'")
+def expand_violations(df, save_path=None):
+    """
+    Parses and expands the 'Violations' column in the DataFrame.
+
+    Parameters:
+    - df: pandas DataFrame with a 'Violations' column
+    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
+
+    Returns:
+    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
+    """
+
+import pandas as pd
+import re
+def expand_violations(df, save_path=None):
+    """
+    Parses and expands the 'Violations' column in the DataFrame.
+
+    Parameters:
+    - df: pandas DataFrame with a 'Violations' column
+    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
+
+    Returns:
+    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
+    """
+
+    def extract_violations(row):
+        violation_text = row.get('Violations', '')
+        if pd.isna(violation_text):
+            return []
+
+        parts = [v.strip() for v in violation_text.split('|') if v.strip()]
+        pattern = r"(?P<number>\d+)\.\s+(?P<text>.+?)\s+-\s+Comments:\s+(?P<comment>.+)"
+
+        extracted = []
+        for part in parts:
+            match = re.match(pattern, part)
+            combined = row.drop(labels=['Violations']).to_dict()
+            combined['raw_violation'] = part
+
+            if match:
+                v = match.groupdict()
+                combined['violation_number'] = v['number']
+                combined['violation_text'] = v['text']
+                combined['violation_comment'] = v['comment']
+                combined['parse_error'] = False
+                combined['error_reason'] = ""
+            else:
+                # Attempt to detect error reason
+                if not re.search(r"\d+\.", part):
+                    reason = "missing violation number"
+                elif "Comments:" not in part:
+                    reason = "missing 'Comments:'"
+                else:
+                    reason = "general format mismatch"
+                
+                combined['violation_number'] = None
+                combined['violation_text'] = None
+                combined['violation_comment'] = None
+                combined['parse_error'] = True
+                combined['error_reason'] = reason
+
+            extracted.append(combined)
+        return extracted
+
+    # Apply extraction across all rows
+    expanded_rows = []
+    for _, row in df.iterrows():
+        expanded_rows.extend(extract_violations(row))
+
+    violations_expanded_df = pd.DataFrame(expanded_rows)
+
+    if save_path:
+        violations_expanded_df.to_csv(save_path, index=False)
+        print(f"✅ Done! File saved as: {save_path}")
+
+    return violations_expanded_df
+
+# Example usage:
+# df = pd.read_csv("Food_Inspections_20250216.csv")
+# violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
+
+
+import pandas as pd
+from thefuzz import process, fuzz
+from collections import defaultdict
+
+def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
+    """
+    Normalizes string columns in a DataFrame using fuzzy matching (via thefuzz).
+
+    Parameters:
+    - df: pandas DataFrame
+    - columns_to_clean: list of column names to normalize
+    - threshold: similarity score for fuzzy grouping (default is 80)
+    - save_path: optional file path to save cleaned DataFrame as CSV
+
+    Returns:
+    - df: DataFrame with new *_normalised columns
+    - all_grouped_labels: dictionary mapping canonical → [grouped originals]
+    """
+    all_grouped_labels = {}
+
+    def fuzzy_normalize_column(df, column_name, threshold=80):
+        print(f"\n🔍 Processing column: {column_name}")
+        
+        # Ensure strings and clean format
+        df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
+
+        unique_values = list(set(df[column_name]))
+
+        reference_mapping = {}
+        groups = defaultdict(list)
+
+        for value in unique_values:
+            if value in reference_mapping:
+                continue
+
+            matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
+            matches = [(match, score) for match, score in matches if score >= threshold]
+
+            best_match = max(matches, key=lambda x: x[1])[0] if matches else value
+
+            for match, score in matches:
+                reference_mapping[match] = best_match
+                groups[best_match].append(match)
+
+        # Apply mapping
+        normalised_col = f"{column_name}_normalised"
+        df[normalised_col] = df[column_name].map(reference_mapping)
+
+        # Store groups for printing
+        all_grouped_labels[column_name] = dict(groups)
+
+        return df
+
+    # Process each column
+    for col in columns_to_clean:
+        df = fuzzy_normalize_column(df, col, threshold)
+
+    # Save to CSV if needed
+    if save_path:
+        df.to_csv(save_path, index=False)
+        print(f"\n✅ Cleaned data saved as: {save_path}")
+
+    # Print grouped results
+    print("\n🧾 All Grouped Labels:")
+    for col, group_map in all_grouped_labels.items():
+        print(f"\n📦 Grouped values for '{col}':")
+        for canonical, originals in group_map.items():
+            if len(originals) > 1:
+                print(f"\n  → {canonical}:")
+                for original in originals:
+                    print(f"     - {original}")
+
+    return df, all_grouped_labels
+
+# Example usage:
+# df = pd.read_csv("Food_Inspections_20250216.csv")
+# columns = ['Facility Type', 'City', 'Inspection Type']
+# cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
 
 def main(args):
 
     df = load_data()
 
     ##### PREPROCESSING ##### WANG YU
-    if not args.no_preprocess:
-        console.log("Running preprocessing on raw file:")
-        df = preprocess(df)
+    if args.process_violations:
+        console.log("Running preprocessing on violations column:")
+        violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
+        #onsole.log("Persisting preprocessed file:")
+        #save_data(df)
 
-        console.log("Persisting preprocessed file:")
-        save_data(df)
+    if args.fuzzy_clean_columns:
+        console.log("Running fuzzy cleaning:")
+        columns = args.columns if args.columns else []  # fallback if None
+        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+        #console.log("Persisting preprocessed file:")
+        #save_data(df)
 
     #### SINGLE PROFILLING ##### 
     if args.single_profile:
