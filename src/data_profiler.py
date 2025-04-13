@@ -94,7 +94,7 @@ class DataProfiler:
         }
 
     # ---------------------------------------------------------------------
-    # Public API
+    # Profiling functions
     # ---------------------------------------------------------------------
     def profile_column(self, col: str, numeric_bins: int = 10) -> Dict[str, Union[int, float, dict]]:
         """Profile *one* column and cache the result under :pyattr:`column_profiles`."""
