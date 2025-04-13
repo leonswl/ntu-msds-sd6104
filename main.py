@@ -8,7 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use("Agg")  
 
-
+from src.association_rule_mining import (clean_and_factorize_data, run_efficient_apriori_from_df)
 from src.preprocess import preprocess
 from src.fds import (
     convert_fd,
@@ -457,7 +457,7 @@ def main(args):
         columns_to_remove = ast.literal_eval(args.columns_to_remove)
 
         df_factorized, mappings = clean_and_factorize_data(
-            input_csv=args.input_csv,
+            df,
             columns_to_remove=columns_to_remove
         )
 
@@ -505,9 +505,6 @@ if __name__ == "__main__":
     
     #Association Mining
     parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
-    parser.add_argument("--input_csv", type=str,
-                        default='data/Food_Inspections_Violations_Expanded_with_cleandata_address.csv',
-                        help="Path to input CSV file for rule mining")
     parser.add_argument("--columns_to_remove", type=str,
                         default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
                         help="Stringified list of column names to remove")

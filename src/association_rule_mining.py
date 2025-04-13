@@ -3,11 +3,11 @@ import pandas as pd
 from efficient_apriori import apriori
 import time
 
-def clean_and_factorize_data(input_csv, columns_to_remove):
+def clean_and_factorize_data(df, columns_to_remove):
 
     start_time = time.time()
     
-    df = pd.read_csv(input_csv)
+    #df = pd.read_csv(input_csv)
     df.drop(columns=columns_to_remove, inplace=True, errors='ignore')
 
     mappings = {}
