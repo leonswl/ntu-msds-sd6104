@@ -1,4 +1,5 @@
-data/Food_Inspections_20250216.csv
+*.csv
+output*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
