@@ -1,5 +1,8 @@
 import os
 import argparse
+from pathlib import Path
+import re
+import ast
 
 from rich.console import Console
 import pandas as pd
@@ -7,6 +10,10 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use("Agg")  
+
+from thefuzz import process, fuzz
+from collections import defaultdict
+
 
 from src.association_rule_mining import (clean_and_factorize_data, run_efficient_apriori_from_df)
 from src.preprocess import preprocess
@@ -21,8 +28,6 @@ from src.fds import (
     InclusionDependencySet
 )
 from src.data_profiler import DataProfiler
-
-
 
 console = Console()
 
@@ -84,6 +89,34 @@ def create_arg_parser():
         required=False,
         type=str,
         help="Specify the method for inclusion dependencies: 'default' or 'approximate'."
+    )
+
+    # Association Mining
+    parser.add_argument(
+        "--rule_mining",
+        action="store_true",
+        help="Run rule mining"
+    )
+
+    parser.add_argument(
+        "--columns_to_remove",
+        type=str,
+        default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
+        help="Stringified list of column names to remove"
+    )
+
+    parser.add_argument(
+        "--min_support",
+        type=float,
+        default=0.05,
+        help="Minimum support threshold for rule mining"
+        )
+    
+    parser.add_argument(
+        "--min_confidence",
+        type=float,
+        default=0.6,
+        help="Minimum confidence threshold for rule mining"
     )
 
     return parser
@@ -202,7 +235,7 @@ def single_profiling(
     max_text_unique: int = 200,
 ) -> None:
     """
-    • Prints a DataFrame with column‑level metrics (no CSV written)
+    • console.logs a DataFrame with column‑level metrics (no CSV written)
     • Saves a first‑digit bar chart for every *numeric* column
     • Saves two bar charts for every *text* column:
         - full range  (only if #unique ≤ max_text_unique)
@@ -215,10 +248,10 @@ def single_profiling(
 
     profiler = DataProfiler(df)
 
-    # Profile table – print via Rich
+    # Profile table – console.log via Rich
     profile_df = profiler.profile_dataframe(numeric_bins=numeric_bins)
     console.rule("[bold green]Column‑level profile[/bold green]")
-    console.print(profile_df)
+    console.console.log(profile_df)
 
     # Numeric columns – first‑digit plots
     for col, row in profile_df.iterrows():
@@ -263,20 +296,8 @@ def single_profiling(
                     dpi=150, bbox_inches="tight")
         plt.close()
         console.log(f"   • Top‑{top_n} plot saved for '{col}'")
-def expand_violations(df, save_path=None):
-    """
-    Parses and expands the 'Violations' column in the DataFrame.
 
-    Parameters:
-    - df: pandas DataFrame with a 'Violations' column
-    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
 
-    Returns:
-    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
-    """
-
-import pandas as pd
-import re
 def expand_violations(df, save_path=None):
     """
     Parses and expands the 'Violations' column in the DataFrame.
@@ -337,18 +358,10 @@ def expand_violations(df, save_path=None):
 
     if save_path:
         violations_expanded_df.to_csv(save_path, index=False)
-        print(f"✅ Done! File saved as: {save_path}")
+        console.log(f"✅ Done! File saved as: {save_path}")
 
     return violations_expanded_df
 
-# Example usage:
-# df = pd.read_csv("Food_Inspections_20250216.csv")
-# violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
-
-
-import pandas as pd
-from thefuzz import process, fuzz
-from collections import defaultdict
 
 def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
     """
@@ -367,7 +380,7 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
     all_grouped_labels = {}
 
     def fuzzy_normalize_column(df, column_name, threshold=80):
-        print(f"\n🔍 Processing column: {column_name}")
+        console.log(f"\n🔍 Processing column: {column_name}")
         
         # Ensure strings and clean format
         df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
@@ -394,7 +407,7 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
         normalised_col = f"{column_name}_normalised"
         df[normalised_col] = df[column_name].map(reference_mapping)
 
-        # Store groups for printing
+        # Store groups for console.loging
         all_grouped_labels[column_name] = dict(groups)
 
         return df
@@ -406,29 +419,19 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
     # Save to CSV if needed
     if save_path:
         df.to_csv(save_path, index=False)
-        print(f"\n✅ Cleaned data saved as: {save_path}")
+        console.log(f"\n✅ Cleaned data saved as: {save_path}")
 
-    # Print grouped results
-    print("\n🧾 All Grouped Labels:")
+    # console.log grouped results
+    console.log("\n🧾 All Grouped Labels:")
     for col, group_map in all_grouped_labels.items():
-        print(f"\n📦 Grouped values for '{col}':")
+        console.log(f"\n📦 Grouped values for '{col}':")
         for canonical, originals in group_map.items():
             if len(originals) > 1:
-                print(f"\n  → {canonical}:")
+                console.log(f"\n  → {canonical}:")
                 for original in originals:
-                    print(f"     - {original}")
+                    console.log(f"     - {original}")
 
     return df, all_grouped_labels
-
-# Example usage:
-# df = pd.read_csv("Food_Inspections_20250216.csv")
-# columns = ['Facility Type', 'City', 'Inspection Type']
-# cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
-
-import pandas as pd
-from thefuzz import process, fuzz
-from collections import defaultdict
-import re
 
 def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
     all_grouped_labels = {}
@@ -464,7 +467,7 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
         return " ".join(output_tokens)
 
     def fuzzy_normalize_column(df, column_name, threshold=80):
-        print(f"\n🔍 Processing column: {column_name}")
+        console.log(f"\n🔍 Processing column: {column_name}")
 
         df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
 
@@ -526,18 +529,22 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
 
     if save_path:
         df.to_csv(save_path, index=False)
-        print(f"\n✅ Cleaned data saved as: {save_path}")
+        console.log(f"\n✅ Cleaned data saved as: {save_path}")
 
-    print("\n🧾 All Grouped Labels:")
+    console.log("\n🧾 All Grouped Labels:")
     for col, group_map in all_grouped_labels.items():
-        print(f"\n📦 Grouped values for '{col}':")
+        console.log(f"\n📦 Grouped values for '{col}':")
         for canonical, originals in group_map.items():
             if len(originals) > 1:
-                print(f"\n  → {canonical}:")
+                console.log(f"\n  → {canonical}:")
                 for original in originals:
-                    print(f"     - {original}")
+                    console.log(f"     - {original}")
 
     return df, all_grouped_labels
+
+
+
+
 def main(args):
 
     df = load_data()
@@ -546,22 +553,17 @@ def main(args):
     if args.process_violations:
         console.log("Running preprocessing on violations column:")
         violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
-        #onsole.log("Persisting preprocessed file:")
-        #save_data(df)
+
 
     if args.fuzzy_clean_columns:
         console.log("Running fuzzy cleaning:")
         columns = args.columns if args.columns else []  # fallback if None
         cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
-        #console.log("Persisting preprocessed file:")
-        #save_data(df)
 
     if args.fuzzy_clean_address:
         console.log("Running fuzzy cleaning for address:")
         columns = args.columns if args.columns else []  # fallback if None
         cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned_address.csv")
-        #console.log("Persisting preprocessed file:")
-        #save_data(df)
 
     #### SINGLE PROFILLING ##### 
     if args.single_profile:
@@ -622,16 +624,6 @@ def main(args):
 if __name__ == "__main__":
 
     parser = create_arg_parser()
-    
-    #Association Mining
-    parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
-    parser.add_argument("--columns_to_remove", type=str,
-                        default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
-                        help="Stringified list of column names to remove")
-    parser.add_argument("--min_support", type=float, default=0.05,
-                        help="Minimum support threshold for rule mining")
-    parser.add_argument("--min_confidence", type=float, default=0.6,
-                        help="Minimum confidence threshold for rule mining")
     
     args = parser.parse_args()
 
