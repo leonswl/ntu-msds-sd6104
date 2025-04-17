@@ -263,17 +263,7 @@ def single_profiling(
                     dpi=150, bbox_inches="tight")
         plt.close()
         console.log(f"   • Top‑{top_n} plot saved for '{col}'")
-def expand_violations(df, save_path=None):
-    """
-    Parses and expands the 'Violations' column in the DataFrame.
 
-    Parameters:
-    - df: pandas DataFrame with a 'Violations' column
-    - save_path: Optional string. If provided, saves the expanded DataFrame to this CSV path.
-
-    Returns:
-    - violations_expanded_df: A new DataFrame with extracted violation details and parsing metadata
-    """
 
 import pandas as pd
 import re
