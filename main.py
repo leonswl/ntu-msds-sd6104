@@ -871,6 +871,108 @@ def convert_ind(ind:desbordante.ind.IND) -> Tuple[list, list]:
 
     return lhs_matches, rhs_matches
 
+import pandas as pd
+import os
+import matplotlib.pyplot as plt
+from openpyxl.utils.exceptions import IllegalCharacterError
+
+def detect_pattern(value):
+    if pd.isna(value):
+        return "Missing"
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    value = str(value).strip()
+    return "".join([
+        "9" if c.isdigit() else
+        "A" if c.isupper() else
+        "a" if c.islower() else
+        c
+        for c in value
+    ])
+
+def clean_display_value(val):
+    return int(val) if isinstance(val, float) and val.is_integer() else val
+
+def analyze_column_patterns(df, column_name, top_n=20, show_pattern_index=None, show_distinct=False, output_dir="column_pattern_histograms"):
+    if column_name not in df.columns:
+        print(f"❌ Column '{column_name}' not found in DataFrame.")
+        return
+
+    if df[column_name].dropna().empty:
+        print(f"⚠️ Column '{column_name}' is empty after dropping NA values.")
+        return
+
+    pattern_series = df[column_name].map(detect_pattern)
+    pattern_counts = pattern_series.value_counts()
+    print(f"✅ Column '{column_name}' has {len(pattern_counts)} unique pattern(s).")
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    summary_data = {
+        "Pattern": pattern_counts.index,
+        "Count": pattern_counts.values
+    }
+
+    # Collect sample values for all patterns (up to 5 per pattern)
+    if show_distinct:
+        sample_values = []
+        all_distinct = set()
+        for pattern in pattern_counts.index:
+            matches = df.loc[pattern_series == pattern, column_name]
+            unique_vals = matches.dropna().unique()
+            clean_vals = [clean_display_value(v) for v in unique_vals]
+            all_distinct.update(clean_vals)
+            sample_values.append(", ".join(map(str, clean_vals[:5])))
+        summary_data["Sample Values"] = sample_values
+
+        print("\n📌 Distinct values (all patterns):")
+        for val in sorted(all_distinct):
+            print(f"- {val}")
+
+    # Save Excel with error handling
+    summary_df = pd.DataFrame(summary_data)
+    excel_path = os.path.join(output_dir, f"{column_name}_pattern_summary.xlsx")
+    try:
+        summary_df.to_excel(excel_path, index=False)
+        print(f"📄 Pattern summary saved to: {excel_path}")
+    except IllegalCharacterError:
+        print("⚠️ Excel export failed due to illegal characters in the content. Summary not saved to Excel.")
+
+    # Plot top N patterns
+    top_patterns = pattern_counts.head(top_n)
+    pattern_labels, pattern_freqs = top_patterns.index.tolist(), top_patterns.values.tolist()
+
+    plt.figure(figsize=(12, 6))
+    plt.barh(pattern_labels, pattern_freqs, color='skyblue')
+    plt.xlabel("Frequency")
+    plt.ylabel("Patterns (Aa9... & Special Characters)")
+    plt.title(f"Top {top_n} Value Patterns in '{column_name}'")
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+    file_path = os.path.join(output_dir, f"{column_name}_patterns_histogram.png")
+    plt.savefig(file_path)
+    plt.show()
+    print(f"📊 Histogram saved to: {file_path}")
+
+    # Print sample values from specific pattern indices
+    if show_pattern_index is not None:
+        if isinstance(show_pattern_index, int):
+            show_pattern_index = [show_pattern_index]
+        elif not isinstance(show_pattern_index, (list, tuple, set)):
+            print(f"❌ Invalid type for show_pattern_index. Must be int or list of int.")
+            return
+
+        print("\n🔍 Sample values for selected pattern indices:")
+        for idx in show_pattern_index:
+            if idx < 0 or idx >= len(top_patterns):
+                print(f"❌ Invalid pattern index {idx}. Valid range: 0 to {len(top_patterns)-1}")
+                continue
+            selected_pattern = pattern_labels[idx]
+            matching_rows = df.loc[pattern_series == selected_pattern, column_name]
+            cleaned_sample = matching_rows.head(10).map(clean_display_value)
+            print(f"\n🔢 Pattern index [{idx}] - {len(matching_rows)} rows match")
+            print(cleaned_sample.to_string(index=False))
+
 
 def main(args):
 
@@ -887,10 +989,63 @@ def main(args):
         columns = args.columns if args.columns else []  # fallback if None
         cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
 
+   
+    parser.add_argument("--input", type=str, required=True, help="Path to the input CSV or Excel file.")
+    parser.add_argument("--columns", nargs="+", required=True, help="List of columns to fuzzy clean.")
+    parser.add_argument("--threshold", type=int, default=80, help="Similarity threshold (default: 80).")
+    parser.add_argument("--save_path", type=str, help="Optional path to save the cleaned CSV.")
+    parser.add_argument("--fuzzy_clean_columns", action="store_true", help="Run fuzzy address cleaning.")
+
+    args = parser.parse_args()
+
+    ext = os.path.splitext(args.input)[1].lower()
+    if ext == ".csv":
+        df = pd.read_csv(args.input)
+    elif ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(args.input)
+    else:
+        print(f"❌ Unsupported file format: {ext}")
+        return
+
     if args.fuzzy_clean_address:
-        console.log("Running fuzzy cleaning for address:")
-        columns = args.columns if args.columns else []  # fallback if None
-        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned_address.csv")
+        print("🚀 Running fuzzy cleaning:")
+        df, grouped_info = fuzzy_clean_address(
+            df,
+            columns_to_clean=args.columns,
+            threshold=args.threshold,
+            save_path=args.save_path
+        )
+
+    parser = argparse.ArgumentParser(description="Analyze value patterns in a DataFrame column.")
+    parser.add_argument("--input", type=str, required=True, help="Path to the CSV or Excel file.")
+    parser.add_argument("--column", type=str, required=True, help="Column name to analyze.")
+    parser.add_argument("--analyze_column_patterns", action="store_true", help="Trigger column pattern analysis.")
+    parser.add_argument("--top_n", type=int, default=20, help="Number of top patterns to show.")
+    parser.add_argument("--show_pattern_index", nargs='*', type=int, help="Indices of patterns to show sample values for.")
+    parser.add_argument("--show_distinct", action="store_true", help="Show distinct values for each pattern.")
+
+    args = parser.parse_args()
+
+    # Load file
+    ext = os.path.splitext(args.input)[1].lower()
+    if ext == ".csv":
+        df = pd.read_csv(args.input)
+    elif ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(args.input)
+    else:
+        print(f"❌ Unsupported file type: {ext}")
+        return
+
+    # Trigger analysis
+    if args.analyze_column_patterns:
+        print("📊 Analyzing column patterns:")
+        analyze_column_patterns(
+            df=df,
+            column_name=args.column,
+            top_n=args.top_n,
+            show_pattern_index=args.show_pattern_index,
+            show_distinct=args.show_distinct
+        )
 
     #### SINGLE PROFILLING ##### 
     if args.single_profile:
