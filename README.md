@@ -63,7 +63,6 @@ python main.py [options]
 ### 🎛 Available Flags & Options
 | Short Flag | Long Option           | Type   | Description                                                                 |
 |------------|------------------------|--------|-----------------------------------------------------------------------------|
-| -np        | --no_preprocess        | flag   | Disable preprocessing on the dataset *(enabled by default)*.                |
 | -s         | --single_profile       | flag   | Perform single-column profiling.                                            |
 | -rm        | --rule_mining          | flag   | Run association rule mining.                                                |
 | -fd        | --func_dependencies    | string | Functional dependency discovery. Options: default, approximate, all.        |

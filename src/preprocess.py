@@ -6,52 +6,53 @@ from collections import defaultdict
 
 console = Console()
 
-def fuzzy_normalize_column(df, column_name, threshold=80):
-    """
-    Normalize text values in a DataFrame column using fuzzy matching.
-    
-    Args:
-    - df (pd.DataFrame): Input DataFrame.
-    - column_name (str): Column name to normalize.
-    - threshold (int): Similarity threshold for fuzzy matching (default is 80).
-    
-    Returns:
-    - pd.DataFrame: DataFrame with a new normalized column.
-    """
-    df[column_name] = df[column_name].astype(str).fillna('')  # Convert to string
-
-    unique_values = list(set(df[column_name].str.lower()))  # Unique values in lowercase
-
-    # Reference mapping for normalization
-    reference_mapping = {}
-    groups = defaultdict(list)  # To store word clusters
-
-    for value in unique_values:
-        # Check if it's already in a group
-        if value in reference_mapping:
-            continue
-        
-        # Find similar words
-        matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
-        matches = [(match, score) for match, score in matches if score >= threshold]
-        
-        if matches:
-            best_match = max(matches, key=lambda x: x[1])[0]  # Pick the best-scoring match
-        else:
-            best_match = value  # Keep original if no good match found
-
-        # Assign all similar words to the best match
-        for match, score in matches:
-            reference_mapping[match] = best_match
-            groups[best_match].append(match)
-
-    # Apply normalization mapping
-    df[f'{column_name}'] = df[column_name].str.lower().map(reference_mapping)
-    
-    return df
-
 
 def preprocess(df):
+
+    def fuzzy_normalize_column(df, column_name, threshold=80):
+        """
+        Normalize text values in a DataFrame column using fuzzy matching.
+        
+        Args:
+        - df (pd.DataFrame): Input DataFrame.
+        - column_name (str): Column name to normalize.
+        - threshold (int): Similarity threshold for fuzzy matching (default is 80).
+        
+        Returns:
+        - pd.DataFrame: DataFrame with a new normalized column.
+        """
+        df[column_name] = df[column_name].astype(str).fillna('')  # Convert to string
+
+        unique_values = list(set(df[column_name].str.lower()))  # Unique values in lowercase
+
+        # Reference mapping for normalization
+        reference_mapping = {}
+        groups = defaultdict(list)  # To store word clusters
+
+        for value in unique_values:
+            # Check if it's already in a group
+            if value in reference_mapping:
+                continue
+            
+            # Find similar words
+            matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
+            matches = [(match, score) for match, score in matches if score >= threshold]
+            
+            if matches:
+                best_match = max(matches, key=lambda x: x[1])[0]  # Pick the best-scoring match
+            else:
+                best_match = value  # Keep original if no good match found
+
+            # Assign all similar words to the best match
+            for match, score in matches:
+                reference_mapping[match] = best_match
+                groups[best_match].append(match)
+
+        # Apply normalization mapping
+        df[f'{column_name}'] = df[column_name].str.lower().map(reference_mapping)
+        
+        return df
+
     # renaming column names to snake_case
     COLUMN_NAMES = [
         'inspection_id',
