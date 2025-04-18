@@ -979,15 +979,27 @@ def main(args):
     df = load_data()
 
     ##### PREPROCESSING ##### WANG YU
-    if args.process_violations:
-        console.log("Running preprocessing on violations column:")
-        violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
+    parser.add_argument("--process_violations", action="store_true", help="Expand and clean the Violations column.")
+    parser.add_argument("--violation_save_path", type=str, help="Path to save expanded violations CSV.")
 
+    if args.process_violations:
+        print("🚨 Running preprocessing on 'Violations' column...")
+        violations_expanded_df = expand_violations(df, save_path=args.violation_save_path)
+
+
+    parser.add_argument("--fuzzy_clean_columns", action="store_true", help="Run fuzzy column normalization.")
+    parser.add_argument("--columns", nargs="+", help="List of column names to fuzzy clean.")
+    parser.add_argument("--threshold", type=int, default=80, help="Similarity threshold for fuzzy matching.")
+    parser.add_argument("--save_path", type=str, help="Path to save the cleaned file.")
 
     if args.fuzzy_clean_columns:
-        console.log("Running fuzzy cleaning:")
-        columns = args.columns if args.columns else []  # fallback if None
-        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+        print("🚀 Running fuzzy cleaning:")
+        df, grouped_info = fuzzy_clean_columns(
+            df=df,
+            columns_to_clean=args.columns,
+            threshold=args.threshold,
+            save_path=args.save_path
+    )
 
    
     parser.add_argument("--input", type=str, required=True, help="Path to the input CSV or Excel file.")
