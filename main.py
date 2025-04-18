@@ -3,23 +3,34 @@ import argparse
 from pathlib import Path
 import re
 import ast
+from typing import Tuple, List, Dict, Any
+from dataclasses import dataclass, field
+
 
 from rich.console import Console
 import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use("Agg")  
 
 from thefuzz import process, fuzz
 from collections import defaultdict
+import desbordante
+import desbordante.fd.algorithms as fd_algorithms
+import desbordante.afd.algorithms as afd_algorithms
+import desbordante.ind.algorithms as ind_algorithms
 
-
-from src.association_rule_mining import (clean_and_factorize_data, run_efficient_apriori_from_df)
+from src.association_rule_mining import (
+    clean_and_factorize_data,
+    run_efficient_apriori_from_df,
+)
 from src.preprocess import preprocess
 from src.data_profiler import DataProfiler
 
+matplotlib.use("Agg")
+
 console = Console()
+
 
 def create_arg_parser():
     """
@@ -32,81 +43,119 @@ def create_arg_parser():
 
     # Argument flag for preprocessing
     parser.add_argument(
-        '-np',
-        '--no-preprocess',
-        action='store_true',
+        "-np",
+        "--no-preprocess",
+        action="store_true",
         required=False,
-        help="Specify this flag to perform preprocessing on the dataset."
+        help="Specify this flag to perform preprocessing on the dataset.",
     )
 
     # Argument flag for profilling
     parser.add_argument(
-        '-s',
-        '--single-profile',
-        action='store_true',
+        "-s",
+        "--single-profile",
+        action="store_true",
         required=False,
-        help="Specify this flag to perform single-column profilling."
+        help="Specify this flag to perform single-column profilling.",
     )
 
     # Argument flag for association rule mining
     parser.add_argument(
-        '-rm',
-        '--rule-mining',
-        action='store_true',
+        "-rm",
+        "--rule-mining",
+        action="store_true",
         required=False,
-        help="Specify this flag to perform association rule mining."
+        help="Specify this flag to perform association rule mining.",
     )
 
     # Argument for functional dependencies
     parser.add_argument(
-        '-fd',
-        '--func-dependencies',
-        choices=['all', 'default', 'approximate'],
-        nargs='?',
+        "-fd",
+        "--func-dependencies",
+        choices=["all", "default", "approximate"],
+        nargs="?",
         default=None,
         required=False,
         type=str,
-        help="Specify the method for functional dependencies: 'default' or 'approximate'."
+        help="Specify the method for functional dependencies: 'default' or 'approximate'.",
     )
 
     # Argument for inclusion dependencies
     parser.add_argument(
-        '-ind',
-        '--ind-dependencies',
-        choices=['all', 'default', 'approximate'],
-        nargs='?',
+        "-ind",
+        "--ind-dependencies",
+        choices=["all", "default", "approximate"],
+        nargs="?",
         default=None,
         required=False,
         type=str,
-        help="Specify the method for inclusion dependencies: 'default' or 'approximate'."
+        help="Specify the method for inclusion dependencies: 'default' or 'approximate'.",
     )
 
     # Association Mining
-    parser.add_argument(
-        "--rule_mining",
-        action="store_true",
-        help="Run rule mining"
-    )
+    parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
 
     parser.add_argument(
         "--columns_to_remove",
         type=str,
         default="['Inspection ID', 'AKA Name', 'Latitude', 'Longitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'Facility Type', 'City', 'Inspection Type', 'City Cleaned', 'State']",
-        help="Stringified list of column names to remove"
+        help="Stringified list of column names to remove",
     )
 
     parser.add_argument(
         "--min_support",
         type=float,
         default=0.05,
-        help="Minimum support threshold for rule mining"
-        )
-    
+        help="Minimum support threshold for rule mining",
+    )
+
     parser.add_argument(
         "--min_confidence",
         type=float,
         default=0.6,
-        help="Minimum confidence threshold for rule mining"
+        help="Minimum confidence threshold for rule mining",
+    )
+
+    parser.add_argument(
+        "--input", type=str, required=True, help="Path to the CSV or Excel file."
+    )
+
+    parser.add_argument(
+        "--column", type=str, required=False, help="Column name to analyze."
+    )
+    parser.add_argument(
+        "--analyze_column_patterns",
+        action="store_true",
+        help="Trigger column pattern analysis.",
+    )
+    parser.add_argument(
+        "--top_n", type=int, default=20, help="Number of top patterns to show."
+    )
+    parser.add_argument(
+        "--show_pattern_index",
+        nargs="*",
+        type=int,
+        help="Indices of patterns to show sample values for.",
+    )
+    parser.add_argument(
+        "--show_distinct",
+        action="store_true",
+        help="Show distinct values for each pattern.",
+    )
+
+    parser.add_argument(
+        "--process-violations",
+        action="store_true"
+    )
+
+    parser.add_argument(
+        "--fuzzy-clean-columns",
+        action="store_true"
+    )
+
+    parser.add_argument(
+        "--fuzzy-clean-address",
+        action="store_true"
     )
 
     return parser
@@ -120,6 +169,7 @@ def load_data():
 
     return df
 
+
 def save_data(df):
     file_path = "data/Food_Inspections_20250216_preprocessed.parquet"
 
@@ -131,17 +181,20 @@ def save_data(df):
 
     console.log(f"[bold green]SUCCESS[/bold green] File persisted to {file_path}")
 
+
 def discover_fds(df):
     results = find_fds(df)
 
-    console.log(f"There are {len(results)} functional dependencies using Default algorithm.")
+    console.log(
+        f"There are {len(results)} functional dependencies using Default algorithm."
+    )
 
     for fd in results:
         console.log(fd)
 
     fd_set = FunctionalDependencySet()
     for result in results:
-        lhs, rhs =  convert_fd(fd=result)
+        lhs, rhs = convert_fd(fd=result)
         fd_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies and store results
@@ -152,23 +205,28 @@ def discover_fds(df):
     all_results = fd_set.get_all_validation_results()
     for (lhs, rhs), result in all_results.items():
         # Create a copy of result without the 'highlights' key
-        filtered_result = {key: value for key, value in result.items() if key != "highlights"}
-        
+        filtered_result = {
+            key: value for key, value in result.items() if key != "highlights"
+        }
+
         console.log(f"FD: {lhs} -> {rhs}, Results: {filtered_result}")
 
     return all_results
 
+
 def discover_afds(df, error):
     results = find_afds(df, error)
 
-    console.log(f"There are {len(results)} functional dependencies using Default algorithm.")
+    console.log(
+        f"There are {len(results)} functional dependencies using Default algorithm."
+    )
 
     for fd in results:
         console.log(fd)
 
     fd_set = FunctionalDependencySet()
     for result in results:
-        lhs, rhs =  convert_fd(fd=result)
+        lhs, rhs = convert_fd(fd=result)
         fd_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies and store results
@@ -179,47 +237,56 @@ def discover_afds(df, error):
     all_results = fd_set.get_all_validation_results()
     for (lhs, rhs), result in all_results.items():
         # Create a copy of result without the 'highlights' key
-        filtered_result = {key: value for key, value in result.items() if key != "highlights"}
-        
+        filtered_result = {
+            key: value for key, value in result.items() if key != "highlights"
+        }
+
         console.log(f"FD: {lhs} -> {rhs}, Results: {filtered_result}")
 
     return all_results
 
+
 def run_ind(df):
     results = find_inds([df, df])
 
-    console.log(f"There are {len(results)} inclusion dependencies using Default algorithm.")
+    console.log(
+        f"There are {len(results)} inclusion dependencies using Default algorithm."
+    )
 
     for ind in results:
         console.log(ind)
 
     ind_set = InclusionDependencySet()
     for result in results:
-        lhs, rhs =  convert_ind(result)
+        lhs, rhs = convert_ind(result)
         ind_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies
     ind_set.validate_ind(df)
 
-def run_aind(df, error):
-    results = find_ainds([df,df], error = error)
 
-    console.log(f"There are {len(results)} inclusion dependencies using Default algorithm.")
+def run_aind(df, error):
+    results = find_ainds([df, df], error=error)
+
+    console.log(
+        f"There are {len(results)} inclusion dependencies using Default algorithm."
+    )
 
     for ind in results:
         console.log(ind)
 
     ind_set = InclusionDependencySet()
     for result in results:
-        lhs, rhs =  convert_ind(result)
+        lhs, rhs = convert_ind(result)
         ind_set.add_dependency(lhs, rhs)
 
     # Validate all dependencies
     ind_set.validate_aind(df)
 
+
 def single_profiling(
     df: pd.DataFrame,
-    out_dir: str = "output/profile",     
+    out_dir: str = "output/profile",
     numeric_bins: int = 10,
     top_n: int = 20,
     max_text_unique: int = 200,
@@ -232,7 +299,7 @@ def single_profiling(
         - top-N + 'Others'
     All PNGs land in *out_dir* (created if missing).
     """
-    
+
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -249,8 +316,9 @@ def single_profiling(
         if isinstance(fd_dist, dict) and fd_dist:
             plt.figure(figsize=(5, 3))
             profiler.plot_first_digit(col)
-            plt.savefig(out_path / f"{col}_first_digit.png",
-                        dpi=150, bbox_inches="tight")
+            plt.savefig(
+                out_path / f"{col}_first_digit.png", dpi=150, bbox_inches="tight"
+            )
             plt.close()
             console.log(f"   • First‑digit plot saved for '{col}'")
 
@@ -268,11 +336,12 @@ def single_profiling(
         if unique_vals <= max_text_unique:
             plt.figure(figsize=(max(6, unique_vals * 0.25), 4))
             profiler.plot_text_frequency(col, top_n=unique_vals, show_pct=False)
-            plt.savefig(out_path / f"{col}_full.png",
-                        dpi=150, bbox_inches="tight")
+            plt.savefig(out_path / f"{col}_full.png", dpi=150, bbox_inches="tight")
             plt.close()
-            console.log(f"   • Full‑range plot saved for '{col}' "
-                        f"({unique_vals} unique values)")
+            console.log(
+                f"   • Full‑range plot saved for '{col}' "
+                f"({unique_vals} unique values)"
+            )
         else:
             console.log(
                 f"   • Skipped full‑range plot for '{col}' "
@@ -282,8 +351,7 @@ def single_profiling(
         # 3b. top‑N (+ Others) plot – always
         plt.figure(figsize=(10, 4))
         profiler.plot_text_frequency(col, top_n=top_n, show_pct=False)
-        plt.savefig(out_path / f"{col}_top{top_n}.png",
-                    dpi=150, bbox_inches="tight")
+        plt.savefig(out_path / f"{col}_top{top_n}.png", dpi=150, bbox_inches="tight")
         plt.close()
         console.log(f"   • Top‑{top_n} plot saved for '{col}'")
 
@@ -301,26 +369,26 @@ def expand_violations(df, save_path=None):
     """
 
     def extract_violations(row):
-        violation_text = row.get('Violations', '')
+        violation_text = row.get("Violations", "")
         if pd.isna(violation_text):
             return []
 
-        parts = [v.strip() for v in violation_text.split('|') if v.strip()]
+        parts = [v.strip() for v in violation_text.split("|") if v.strip()]
         pattern = r"(?P<number>\d+)\.\s+(?P<text>.+?)\s+-\s+Comments:\s+(?P<comment>.+)"
 
         extracted = []
         for part in parts:
             match = re.match(pattern, part)
-            combined = row.drop(labels=['Violations']).to_dict()
-            combined['raw_violation'] = part
+            combined = row.drop(labels=["Violations"]).to_dict()
+            combined["raw_violation"] = part
 
             if match:
                 v = match.groupdict()
-                combined['violation_number'] = v['number']
-                combined['violation_text'] = v['text']
-                combined['violation_comment'] = v['comment']
-                combined['parse_error'] = False
-                combined['error_reason'] = ""
+                combined["violation_number"] = v["number"]
+                combined["violation_text"] = v["text"]
+                combined["violation_comment"] = v["comment"]
+                combined["parse_error"] = False
+                combined["error_reason"] = ""
             else:
                 # Attempt to detect error reason
                 if not re.search(r"\d+\.", part):
@@ -329,12 +397,12 @@ def expand_violations(df, save_path=None):
                     reason = "missing 'Comments:'"
                 else:
                     reason = "general format mismatch"
-                
-                combined['violation_number'] = None
-                combined['violation_text'] = None
-                combined['violation_comment'] = None
-                combined['parse_error'] = True
-                combined['error_reason'] = reason
+
+                combined["violation_number"] = None
+                combined["violation_text"] = None
+                combined["violation_comment"] = None
+                combined["parse_error"] = True
+                combined["error_reason"] = reason
 
             extracted.append(combined)
         return extracted
@@ -371,9 +439,9 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
 
     def fuzzy_normalize_column(df, column_name, threshold=80):
         console.log(f"\n🔍 Processing column: {column_name}")
-        
+
         # Ensure strings and clean format
-        df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
+        df[column_name] = df[column_name].astype(str).fillna("").str.strip().str.lower()
 
         unique_values = list(set(df[column_name]))
 
@@ -423,12 +491,13 @@ def fuzzy_clean_columns(df, columns_to_clean, threshold=80, save_path=None):
 
     return df, all_grouped_labels
 
+
 def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
     all_grouped_labels = {}
 
     def contains_numeric_range(value):
         # Checks if the string contains patterns like 3443-3445
-        return bool(re.search(r'\b\d{1,5}-\d{1,5}\b', value))
+        return bool(re.search(r"\b\d{1,5}-\d{1,5}\b", value))
 
     def tokenize_address(value):
         tokens = value.strip().lower().split()
@@ -436,17 +505,21 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
         text_tokens = []
 
         for i, token in enumerate(tokens):
-            if re.fullmatch(r"[#\-]?\d+([a-z]*)?", token):  # Matches 123, -02, 11a, etc.
+            if re.fullmatch(
+                r"[#\-]?\d+([a-z]*)?", token
+            ):  # Matches 123, -02, 11a, etc.
                 numeric_positions[i] = token
             else:
                 text_tokens.append(token)
-        
+
         return text_tokens, numeric_positions, tokens
 
     def detokenize_address(text_tokens, numeric_positions):
         output_tokens = []
         text_iter = iter(text_tokens)
-        for i in range(max(numeric_positions.keys(), default=-1) + len(text_tokens) + 1):
+        for i in range(
+            max(numeric_positions.keys(), default=-1) + len(text_tokens) + 1
+        ):
             if i in numeric_positions:
                 output_tokens.append(numeric_positions[i])
             else:
@@ -459,7 +532,7 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
     def fuzzy_normalize_column(df, column_name, threshold=80):
         console.log(f"\n🔍 Processing column: {column_name}")
 
-        df[column_name] = df[column_name].astype(str).fillna('').str.strip().str.lower()
+        df[column_name] = df[column_name].astype(str).fillna("").str.strip().str.lower()
 
         # Identify rows to exclude from fuzzy matching
         df[f"{column_name}_skip_fuzzy"] = df[column_name].apply(contains_numeric_range)
@@ -468,7 +541,9 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
         df[f"{column_name}_text_tokens"] = tokenized.apply(lambda x: x[0])
         df[f"{column_name}_num_positions"] = tokenized.apply(lambda x: x[1])
         df[f"{column_name}_orig_tokens"] = tokenized.apply(lambda x: x[2])
-        df[f"{column_name}_text"] = df[f"{column_name}_text_tokens"].apply(lambda x: " ".join(x))
+        df[f"{column_name}_text"] = df[f"{column_name}_text_tokens"].apply(
+            lambda x: " ".join(x)
+        )
 
         # Perform fuzzy matching only on rows without numeric ranges
         mask_fuzzy = ~df[f"{column_name}_skip_fuzzy"]
@@ -481,7 +556,9 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
             if value in reference_mapping:
                 continue
 
-            matches = process.extract(value, values_to_match, limit=10, scorer=fuzz.ratio)
+            matches = process.extract(
+                value, values_to_match, limit=10, scorer=fuzz.ratio
+            )
             matches = [(match, score) for match, score in matches if score >= threshold]
 
             best_match = max(matches, key=lambda x: x[1])[0] if matches else value
@@ -494,23 +571,39 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
 
         # Map fuzzy results
         df[f"{column_name}_text_normalised"] = df.apply(
-            lambda row: row[f"{column_name}_text"] if row[f"{column_name}_skip_fuzzy"]
-            else reference_mapping.get(row[f"{column_name}_text"], row[f"{column_name}_text"]),
-            axis=1
+            lambda row: (
+                row[f"{column_name}_text"]
+                if row[f"{column_name}_skip_fuzzy"]
+                else reference_mapping.get(
+                    row[f"{column_name}_text"], row[f"{column_name}_text"]
+                )
+            ),
+            axis=1,
         )
 
-        df[f"{column_name}_text_tokens_normalised"] = df[f"{column_name}_text_normalised"].apply(lambda x: x.split())
+        df[f"{column_name}_text_tokens_normalised"] = df[
+            f"{column_name}_text_normalised"
+        ].apply(lambda x: x.split())
         df[f"{column_name}_normalised"] = df.apply(
-            lambda row: detokenize_address(row[f"{column_name}_text_tokens_normalised"], row[f"{column_name}_num_positions"]),
-            axis=1
+            lambda row: detokenize_address(
+                row[f"{column_name}_text_tokens_normalised"],
+                row[f"{column_name}_num_positions"],
+            ),
+            axis=1,
         )
 
-        df.drop(columns=[
-            f"{column_name}_text_tokens", f"{column_name}_num_positions",
-            f"{column_name}_orig_tokens", f"{column_name}_text",
-            f"{column_name}_text_normalised", f"{column_name}_text_tokens_normalised",
-            f"{column_name}_skip_fuzzy"
-        ], inplace=True)
+        df.drop(
+            columns=[
+                f"{column_name}_text_tokens",
+                f"{column_name}_num_positions",
+                f"{column_name}_orig_tokens",
+                f"{column_name}_text",
+                f"{column_name}_text_normalised",
+                f"{column_name}_text_tokens_normalised",
+                f"{column_name}_skip_fuzzy",
+            ],
+            inplace=True,
+        )
 
         return df
 
@@ -533,14 +626,14 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
     return df, all_grouped_labels
 
 
-def find_fds(df, algorithm_name='Default'):
+def find_fds(df, algorithm_name="Default"):
     """
     Finds functional dependencies in a given DataFrame using a specified algorithm.
-    
+
     Parameters:
         df (pd.DataFrame): The input DataFrame.
-        algorithm_name (str): The name of the FD algorithm to use. Defaults to 'Default'. Options are 
-    
+        algorithm_name (str): The name of the FD algorithm to use. Defaults to 'Default'. Options are
+
     Returns:
         list: A list of discovered functional dependencies.
     """
@@ -549,23 +642,25 @@ def find_fds(df, algorithm_name='Default'):
         algo_class = getattr(fd_algorithms, algorithm_name, fd_algorithms.Default)
 
         console.log(f"Algorthm: {algo_class.__name__}")
-        
+
         algo = algo_class()
         algo.load_data(table=df)
         algo.execute()
         return algo.get_fds()
     except AttributeError:
-        raise ValueError(f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(fd_algorithms)}")
-    
+        raise ValueError(
+            f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(fd_algorithms)}"
+        )
 
-def find_afds(df:pd.DataFrame, error:float=0.1, algorithm_name:str='Default'):
+
+def find_afds(df: pd.DataFrame, error: float = 0.1, algorithm_name: str = "Default"):
     """
     Finds approximate functional dependencies in a given DataFrame using a specified algorithm.
-    
+
     Parameters:
         df (pd.DataFrame): The input DataFrame.
         algorithm_name (str): The name of the FD algorithm to use. Defaults to 'Default'.
-    
+
     Returns:
         list: A list of discovered approximate functional dependencies.
     """
@@ -575,23 +670,25 @@ def find_afds(df:pd.DataFrame, error:float=0.1, algorithm_name:str='Default'):
         algo_class = getattr(afd_algorithms, algorithm_name, afd_algorithms.Default)
 
         console.log(f"Algorthm: {algo_class.__name__}")
-        
+
         algo = algo_class()
         algo.load_data(table=df)
         algo.execute(error=error)
         return algo.get_fds()
     except AttributeError:
-        raise ValueError(f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(afd_algorithms)}")
-    
+        raise ValueError(
+            f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(afd_algorithms)}"
+        )
 
-def find_inds(df:list [pd.DataFrame] | pd.DataFrame, algorithm_name:str='Default'):
+
+def find_inds(df: list[pd.DataFrame] | pd.DataFrame, algorithm_name: str = "Default"):
     """
     Finds inclusion dependencies in a given DataFrame using a specified algorithm.
-    
+
     Parameters:
         df (pd.DataFrame): The input DataFrame.
         algorithm_name (str): The name of the FD algorithm to use. Defaults to 'Default'.
-    
+
     Returns:
         list: A list of discovered approximate functional dependencies.
     """
@@ -601,30 +698,37 @@ def find_inds(df:list [pd.DataFrame] | pd.DataFrame, algorithm_name:str='Default
         algo_class = getattr(ind_algorithms, algorithm_name, ind_algorithms.Default)
 
         console.log(f"Algorthm: {algo_class.__name__}")
-        
+
         algo = algo_class()
         algo.load_data(tables=df)
         algo.execute(
             allow_duplicates=False,  # Ignore duplicate INDs
         )
-        
+
         # Filter out self-dependencies
         return [
-            ind for ind in algo.get_inds()
+            ind
+            for ind in algo.get_inds()
             if ind.get_lhs().column_indices != ind.get_rhs().column_indices
         ]
     except AttributeError:
-        raise ValueError(f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(ind_algorithms)}")
+        raise ValueError(
+            f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(ind_algorithms)}"
+        )
 
-    
-def find_ainds(df:list [pd.DataFrame] | pd.DataFrame, algorithm_name:str='Default', error:float=0.3):
+
+def find_ainds(
+    df: list[pd.DataFrame] | pd.DataFrame,
+    algorithm_name: str = "Default",
+    error: float = 0.3,
+):
     """
     Finds approximate inclusion dependencies in a given DataFrame using a specified algorithm.
-    
+
     Parameters:
         df (pd.DataFrame): The input DataFrame.
         algorithm_name (str): The name of the FD algorithm to use. Defaults to 'Default'.
-    
+
     Returns:
         list: A list of discovered approximate functional dependencies.
     """
@@ -634,36 +738,43 @@ def find_ainds(df:list [pd.DataFrame] | pd.DataFrame, algorithm_name:str='Defaul
         algo_class = getattr(ind_algorithms, algorithm_name, ind_algorithms.Default)
 
         console.log(f"Algorthm: {algo_class.__name__}")
-        
+
         algo = algo_class()
         algo.load_data(tables=df)
         algo.execute(
             max_lhs_size=2,  # Look for multi-column INDs
             allow_approximate=True,  # Enable approximate matches
-            error_threshold=error  # Allow 20% violations
+            error_threshold=error,  # Allow 20% violations
         )
         # Filter out self-dependencies
         return [
-            ind for ind in algo.get_inds()
+            ind
+            for ind in algo.get_inds()
             if ind.get_lhs().column_indices != ind.get_rhs().column_indices
         ]
     except AttributeError:
-        raise ValueError(f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(ind_algorithms)}")
+        raise ValueError(
+            f"Algorithm '{algorithm_name}' not found. Available algorithms: {dir(ind_algorithms)}"
+        )
+
 
 @dataclass
 class FunctionalDependency:
     lhs: List[str]  # Left-hand side attributes
-    rhs: str        # Right-hand side attribute
+    rhs: str  # Right-hand side attribute
 
     def __str__(self):
-       lhs_count = len(self.lhs)
-       base = f"LHS={self.lhs} ({lhs_count}), RHS={self.rhs}"
-       return base
-    
+        lhs_count = len(self.lhs)
+        base = f"LHS={self.lhs} ({lhs_count}), RHS={self.rhs}"
+        return base
+
+
 @dataclass
 class FunctionalDependencySet:
     dependencies: List[FunctionalDependency] = field(default_factory=list)
-    validation_results: Dict[Tuple[Tuple[str, ...], str], Dict[str, Any]] = field(default_factory=dict)
+    validation_results: Dict[Tuple[Tuple[str, ...], str], Dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     def add_dependency(self, lhs: List[str], rhs: str):
         """Adds a new functional dependency to the set."""
@@ -676,13 +787,12 @@ class FunctionalDependencySet:
     def __iter__(self):
         """Allows iteration over functional dependencies."""
         return iter(self.dependencies)
-    
+
     def validate_fd(self, df):
         """Validates all functional dependencies in the dataset and stores the results."""
-        
 
         verifier = desbordante.fd_verification.algorithms.Default()
-    
+
         verifier.load_data(table=df)
 
         for fd in self.dependencies:
@@ -699,22 +809,28 @@ class FunctionalDependencySet:
             self.validation_results[fd_key] = {
                 "holds": verifier.fd_holds(),
                 "num_violations": verifier.get_num_error_clusters(),
-                "highlights": highlights
+                "highlights": highlights,
             }
 
             if self.validation_results[fd_key]["holds"]:
                 # console.log(GREEN_CODE, f"FD holds: {fd.lhs} -> {fd.rhs}", DEFAULT_COLOR_CODE)
-                console.log(f"FD holds: {fd.lhs} -> {fd.rhs}", style="bold black on green")
+                console.log(
+                    f"FD holds: {fd.lhs} -> {fd.rhs}", style="bold black on green"
+                )
 
             else:
-                console.log(f"FD does not hold: {fd.lhs} -> {fd.rhs}", style="bold white on red")
-                console.log(f"Number of clusters violating FD: {self.validation_results[fd_key]['num_violations']}")
+                console.log(
+                    f"FD does not hold: {fd.lhs} -> {fd.rhs}", style="bold white on red"
+                )
+                console.log(
+                    f"Number of clusters violating FD: {self.validation_results[fd_key]['num_violations']}"
+                )
 
-    def validate_afd(self, df:pd.DataFrame, error:float=0.05):
+    def validate_afd(self, df: pd.DataFrame, error: float = 0.05):
         """Validates all functional dependencies in the dataset and stores the results."""
 
         verifier = desbordante.afd_verification.algorithms.Default()
-            
+
         verifier.load_data(table=df)
 
         for fd in self.dependencies:
@@ -723,31 +839,43 @@ class FunctionalDependencySet:
 
             if lhs_idx[0] == -1:
                 continue
-            
+
             verifier.execute(lhs_indices=lhs_idx, rhs_indices=[rhs_idx])
             highlights = verifier.get_highlights()
 
             fd_holds = verifier.get_error() < error
 
             if fd_holds:
-                console.log("AFD with this error threshold holds", style="bold black on green")
+                console.log(
+                    "AFD with this error threshold holds", style="bold black on green"
+                )
             else:
-                console.log(f"AFD with this error threshold does not hold", style="bold white on red")
-                console.log(f"But the same AFD with error threshold = {verifier.get_error()} holds.")
-
+                console.log(
+                    f"AFD with this error threshold does not hold",
+                    style="bold white on red",
+                )
+                console.log(
+                    f"But the same AFD with error threshold = {verifier.get_error()} holds."
+                )
 
             fd_key = (tuple(fd.lhs), fd.rhs)
             self.validation_results[fd_key] = {
                 "holds": fd_holds,
                 "num_violations": verifier.get_num_error_clusters(),
-                "highlights": highlights
+                "highlights": highlights,
             }
 
             if self.validation_results[fd_key]["holds"]:
-                console.log(f"FD holds: {fd.lhs} -> {fd.rhs}", style="bold black on green")
+                console.log(
+                    f"FD holds: {fd.lhs} -> {fd.rhs}", style="bold black on green"
+                )
             else:
-                console.log(f"FD does not hold: {fd.lhs} -> {fd.rhs}", style="bold white on red")
-                console.log(f"Number of clusters violating FD: {self.validation_results[fd_key]['num_violations']}")
+                console.log(
+                    f"FD does not hold: {fd.lhs} -> {fd.rhs}", style="bold white on red"
+                )
+                console.log(
+                    f"Number of clusters violating FD: {self.validation_results[fd_key]['num_violations']}"
+                )
 
     def get_validation_result(self, lhs: List[str], rhs: str) -> Dict[str, Any]:
         """Retrieves stored validation results for a specific FD."""
@@ -757,7 +885,7 @@ class FunctionalDependencySet:
     def get_all_validation_results(self) -> Dict[Tuple[str, str], Dict[str, Any]]:
         """Returns all stored validation results."""
         return self.validation_results
-    
+
 
 @dataclass
 class InclusionDependency:
@@ -765,14 +893,17 @@ class InclusionDependency:
     rhs: List[str]  # Right-hand side attributes
 
     def __str__(self):
-       lhs_count = len(self.lhs)
-       base = f"LHS={self.lhs} ({lhs_count}), RHS={self.rhs}"
-       return base
-    
+        lhs_count = len(self.lhs)
+        base = f"LHS={self.lhs} ({lhs_count}), RHS={self.rhs}"
+        return base
+
+
 @dataclass
 class InclusionDependencySet:
     dependencies: List[InclusionDependency] = field(default_factory=list)
-    validation_results: Dict[Tuple[Tuple[str, ...], str], Dict[str, Any]] = field(default_factory=dict)
+    validation_results: Dict[Tuple[Tuple[str, ...], str], Dict[str, Any]] = field(
+        default_factory=dict
+    )
 
     def add_dependency(self, lhs: List[str], rhs: List[str]):
         """Adds a new functional dependency to the set."""
@@ -785,7 +916,7 @@ class InclusionDependencySet:
     def __iter__(self):
         """Allows iteration over functional dependencies."""
         return iter(self.dependencies)
-    
+
     def validate_ind(self, df):
         """Validates all inclusion dependencies in the dataset and displays the results."""
 
@@ -809,11 +940,14 @@ class InclusionDependencySet:
             algo = desbordante.ind_verification.algorithms.Default()
             algo.load_data(tables=[df, df])
             algo.execute(lhs_indices=lhs_idx, rhs_indices=rhs_idx)
-            
+
             if algo.get_error() == 0:
                 console.log("IND holds", style="bold black on green")
             else:
-                console.log(f"IND holds with error = {algo.get_error():.2}", style="bold white on red")
+                console.log(
+                    f"IND holds with error = {algo.get_error():.2}",
+                    style="bold white on red",
+                )
 
     def validate_aind(self, df):
         """Validates all approximate inclusion dependencies in the dataset and displays the results."""
@@ -838,27 +972,31 @@ class InclusionDependencySet:
             algo = desbordante.aind_verification.algorithms.Default()
             algo.load_data(tables=[df, df])
             algo.execute(lhs_indices=lhs_idx, rhs_indices=rhs_idx)
-            
+
             if algo.get_error() == 0:
                 console.log("IND holds", style="bold black on green")
             else:
-                console.log(f"AIND holds with error = {algo.get_error():.2}", style="bold white on red")
+                console.log(
+                    f"AIND holds with error = {algo.get_error():.2}",
+                    style="bold white on red",
+                )
 
 
-def convert_fd(fd:desbordante.fd.FD) -> Tuple[list, str]:
-    fd_str = str(fd) # convert fd to string
-    fd_str_split = fd_str.split("->") # split fd to lhs and rhs
-    lhs = fd_str_split[0].strip() 
+def convert_fd(fd: desbordante.fd.FD) -> Tuple[list, str]:
+    fd_str = str(fd)  # convert fd to string
+    fd_str_split = fd_str.split("->")  # split fd to lhs and rhs
+    lhs = fd_str_split[0].strip()
     rhs = fd_str_split[-1].strip()
 
-    lhs_list = lhs[1:-1].split(' ') # convert lhs to list of attributes
+    lhs_list = lhs[1:-1].split(" ")  # convert lhs to list of attributes
 
     return lhs_list, rhs
 
-def convert_ind(ind:desbordante.ind.IND) -> Tuple[list, list]:
+
+def convert_ind(ind: desbordante.ind.IND) -> Tuple[list, list]:
     ind_str = str(ind)
-    ind_str_split = ind_str.split("->") # split fd to lhs and rhs
-    lhs = ind_str_split[0].strip() 
+    ind_str_split = ind_str.split("->")  # split fd to lhs and rhs
+    lhs = ind_str_split[0].strip()
     rhs = ind_str_split[-1].strip()
 
     # Regex to match content within square brackets
@@ -871,10 +1009,12 @@ def convert_ind(ind:desbordante.ind.IND) -> Tuple[list, list]:
 
     return lhs_matches, rhs_matches
 
+
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from openpyxl.utils.exceptions import IllegalCharacterError
+
 
 def detect_pattern(value):
     if pd.isna(value):
@@ -882,36 +1022,43 @@ def detect_pattern(value):
     if isinstance(value, float) and value.is_integer():
         value = int(value)
     value = str(value).strip()
-    return "".join([
-        "9" if c.isdigit() else
-        "A" if c.isupper() else
-        "a" if c.islower() else
-        c
-        for c in value
-    ])
+    return "".join(
+        [
+            "9" if c.isdigit() else "A" if c.isupper() else "a" if c.islower() else c
+            for c in value
+        ]
+    )
+
 
 def clean_display_value(val):
     return int(val) if isinstance(val, float) and val.is_integer() else val
 
-def analyze_column_patterns(df, column_name, top_n=20, show_pattern_index=None, show_distinct=False, output_dir="column_pattern_histograms"):
+
+def analyze_column_patterns(
+    df,
+    column_name,
+    top_n=20,
+    show_pattern_index=None,
+    show_distinct=False,
+    output_dir="column_pattern_histograms",
+):
     if column_name not in df.columns:
-        print(f"❌ Column '{column_name}' not found in DataFrame.")
+        console.log(f"❌ Column '{column_name}' not found in DataFrame.")
         return
 
     if df[column_name].dropna().empty:
-        print(f"⚠️ Column '{column_name}' is empty after dropping NA values.")
+        console.log(f"⚠️ Column '{column_name}' is empty after dropping NA values.")
         return
 
     pattern_series = df[column_name].map(detect_pattern)
     pattern_counts = pattern_series.value_counts()
-    print(f"✅ Column '{column_name}' has {len(pattern_counts)} unique pattern(s).")
+    console.log(
+        f"✅ Column '{column_name}' has {len(pattern_counts)} unique pattern(s)."
+    )
 
     os.makedirs(output_dir, exist_ok=True)
 
-    summary_data = {
-        "Pattern": pattern_counts.index,
-        "Count": pattern_counts.values
-    }
+    summary_data = {"Pattern": pattern_counts.index, "Count": pattern_counts.values}
 
     # Collect sample values for all patterns (up to 5 per pattern)
     if show_distinct:
@@ -925,25 +1072,30 @@ def analyze_column_patterns(df, column_name, top_n=20, show_pattern_index=None, 
             sample_values.append(", ".join(map(str, clean_vals[:5])))
         summary_data["Sample Values"] = sample_values
 
-        print("\n📌 Distinct values (all patterns):")
+        console.log("\n📌 Distinct values (all patterns):")
         for val in sorted(all_distinct):
-            print(f"- {val}")
+            console.log(f"- {val}")
 
     # Save Excel with error handling
     summary_df = pd.DataFrame(summary_data)
     excel_path = os.path.join(output_dir, f"{column_name}_pattern_summary.xlsx")
     try:
         summary_df.to_excel(excel_path, index=False)
-        print(f"📄 Pattern summary saved to: {excel_path}")
+        console.log(f"📄 Pattern summary saved to: {excel_path}")
     except IllegalCharacterError:
-        print("⚠️ Excel export failed due to illegal characters in the content. Summary not saved to Excel.")
+        console.log(
+            "⚠️ Excel export failed due to illegal characters in the content. Summary not saved to Excel."
+        )
 
     # Plot top N patterns
     top_patterns = pattern_counts.head(top_n)
-    pattern_labels, pattern_freqs = top_patterns.index.tolist(), top_patterns.values.tolist()
+    pattern_labels, pattern_freqs = (
+        top_patterns.index.tolist(),
+        top_patterns.values.tolist(),
+    )
 
     plt.figure(figsize=(12, 6))
-    plt.barh(pattern_labels, pattern_freqs, color='skyblue')
+    plt.barh(pattern_labels, pattern_freqs, color="skyblue")
     plt.xlabel("Frequency")
     plt.ylabel("Patterns (Aa9... & Special Characters)")
     plt.title(f"Top {top_n} Value Patterns in '{column_name}'")
@@ -952,106 +1104,82 @@ def analyze_column_patterns(df, column_name, top_n=20, show_pattern_index=None, 
     file_path = os.path.join(output_dir, f"{column_name}_patterns_histogram.png")
     plt.savefig(file_path)
     plt.show()
-    print(f"📊 Histogram saved to: {file_path}")
+    console.log(f"📊 Histogram saved to: {file_path}")
 
-    # Print sample values from specific pattern indices
+    # console.log sample values from specific pattern indices
     if show_pattern_index is not None:
         if isinstance(show_pattern_index, int):
             show_pattern_index = [show_pattern_index]
         elif not isinstance(show_pattern_index, (list, tuple, set)):
-            print(f"❌ Invalid type for show_pattern_index. Must be int or list of int.")
+            console.log(
+                f"❌ Invalid type for show_pattern_index. Must be int or list of int."
+            )
             return
 
-        print("\n🔍 Sample values for selected pattern indices:")
+        console.log("\n🔍 Sample values for selected pattern indices:")
         for idx in show_pattern_index:
             if idx < 0 or idx >= len(top_patterns):
-                print(f"❌ Invalid pattern index {idx}. Valid range: 0 to {len(top_patterns)-1}")
+                console.log(
+                    f"❌ Invalid pattern index {idx}. Valid range: 0 to {len(top_patterns)-1}"
+                )
                 continue
             selected_pattern = pattern_labels[idx]
             matching_rows = df.loc[pattern_series == selected_pattern, column_name]
             cleaned_sample = matching_rows.head(10).map(clean_display_value)
-            print(f"\n🔢 Pattern index [{idx}] - {len(matching_rows)} rows match")
-            print(cleaned_sample.to_string(index=False))
+            console.log(f"\n🔢 Pattern index [{idx}] - {len(matching_rows)} rows match")
+            console.log(cleaned_sample.to_string(index=False))
 
 
 def main(args):
 
-    df = load_data()
-
+    ext = os.path.splitext(args.input)[1].lower()
+    if ext == ".csv":
+        df = pd.read_csv(args.input)
+    elif ext in [".xls", ".xlsx"]:
+        df = pd.read_excel(args.input)
+    else:
+        console.log(f"❌ Unsupported file format: {ext}")
+        return
+    
     ##### PREPROCESSING ##### WANG YU
     if args.process_violations:
         console.log("Running preprocessing on violations column:")
-        violations_df = expand_violations(df, save_path="Food_Inspections_Violations_Expanded.csv")
-
+        violations_df = expand_violations(
+            df, save_path="data/Food_Inspections_Violations_Expanded.csv"
+        )
 
     if args.fuzzy_clean_columns:
         console.log("Running fuzzy cleaning:")
         columns = args.columns if args.columns else []  # fallback if None
-        cleaned_df, grouped_info = fuzzy_clean_columns(df, columns, save_path="Food_Inspections_Cleaned.csv")
+        cleaned_df, grouped_info = fuzzy_clean_columns(
+            df, columns, save_path="Food_Inspections_Cleaned.csv"
+        )
 
-   
-    parser.add_argument("--input", type=str, required=True, help="Path to the input CSV or Excel file.")
-    parser.add_argument("--columns", nargs="+", required=True, help="List of columns to fuzzy clean.")
-    parser.add_argument("--threshold", type=int, default=80, help="Similarity threshold (default: 80).")
-    parser.add_argument("--save_path", type=str, help="Optional path to save the cleaned CSV.")
-    parser.add_argument("--fuzzy_clean_columns", action="store_true", help="Run fuzzy address cleaning.")
-
-    args = parser.parse_args()
-
-    ext = os.path.splitext(args.input)[1].lower()
-    if ext == ".csv":
-        df = pd.read_csv(args.input)
-    elif ext in [".xls", ".xlsx"]:
-        df = pd.read_excel(args.input)
-    else:
-        print(f"❌ Unsupported file format: {ext}")
-        return
 
     if args.fuzzy_clean_address:
-        print("🚀 Running fuzzy cleaning:")
+        console.log("🚀 Running fuzzy cleaning:")
         df, grouped_info = fuzzy_clean_address(
             df,
             columns_to_clean=args.columns,
             threshold=args.threshold,
-            save_path=args.save_path
+            save_path=args.save_path,
         )
-
-    parser = argparse.ArgumentParser(description="Analyze value patterns in a DataFrame column.")
-    parser.add_argument("--input", type=str, required=True, help="Path to the CSV or Excel file.")
-    parser.add_argument("--column", type=str, required=True, help="Column name to analyze.")
-    parser.add_argument("--analyze_column_patterns", action="store_true", help="Trigger column pattern analysis.")
-    parser.add_argument("--top_n", type=int, default=20, help="Number of top patterns to show.")
-    parser.add_argument("--show_pattern_index", nargs='*', type=int, help="Indices of patterns to show sample values for.")
-    parser.add_argument("--show_distinct", action="store_true", help="Show distinct values for each pattern.")
-
-    args = parser.parse_args()
-
-    # Load file
-    ext = os.path.splitext(args.input)[1].lower()
-    if ext == ".csv":
-        df = pd.read_csv(args.input)
-    elif ext in [".xls", ".xlsx"]:
-        df = pd.read_excel(args.input)
-    else:
-        print(f"❌ Unsupported file type: {ext}")
-        return
 
     # Trigger analysis
     if args.analyze_column_patterns:
-        print("📊 Analyzing column patterns:")
+        console.log("📊 Analyzing column patterns:")
         analyze_column_patterns(
             df=df,
             column_name=args.column,
             top_n=args.top_n,
             show_pattern_index=args.show_pattern_index,
-            show_distinct=args.show_distinct
+            show_distinct=args.show_distinct,
         )
 
-    #### SINGLE PROFILLING ##### 
+    #### SINGLE PROFILLING #####
     if args.single_profile:
         single_profiling(df)
         console.log("Running Single Profilling")
-
 
     #### RULE MINING ##### EUGENE
     if args.rule_mining:
@@ -1061,27 +1189,26 @@ def main(args):
         columns_to_remove = ast.literal_eval(args.columns_to_remove)
 
         df_factorized, mappings = clean_and_factorize_data(
-            df,
-            columns_to_remove=columns_to_remove
+            df, columns_to_remove=columns_to_remove
         )
 
         run_efficient_apriori_from_df(
             df=df_factorized,
             min_support=args.min_support,
-            min_confidence=args.min_confidence
+            min_confidence=args.min_confidence,
         )
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
-        if args.func_dependencies == 'default':
+        if args.func_dependencies == "default":
             console.log("Running both Default Functional Dependences:")
             fd_results = discover_fds(df)
 
-        elif args.func_dependencies == 'approximate':
+        elif args.func_dependencies == "approximate":
             console.log("Running both Approximate Functional Dependences:")
             afd_results = discover_afds(df=df, error=0.05)
 
-        elif args.func_dependencies == 'all':
+        elif args.func_dependencies == "all":
             console.log("Running both Default and Approximate Functional Dependences:")
             fd_results = discover_fds(df)
             afd_results = discover_afds(df=df, error=0.05)
@@ -1089,24 +1216,24 @@ def main(args):
     ##### INCLUSION DEPENDENCIES #####
     if args.ind_dependencies:
 
-        if args.ind_dependencies == 'default':
+        if args.ind_dependencies == "default":
             console.log("Running the Default Inclusion Dependences:")
             run_ind(df)
 
-        elif args.ind_dependencies == 'approximate':
+        elif args.ind_dependencies == "approximate":
             console.log("Running Approximate Inclusion Dependences")
             run_aind(df=df, error=0.2)
 
-        elif args.ind_dependencies == 'all':
+        elif args.ind_dependencies == "all":
             console.log("Running both Default and Approximate Inclusion Dependences:")
             run_ind(df)
             run_aind(df=df, error=0.2)
-        
+
 
 if __name__ == "__main__":
 
     parser = create_arg_parser()
-    
+
     args = parser.parse_args()
 
     console.log(f"Args: {args}")
