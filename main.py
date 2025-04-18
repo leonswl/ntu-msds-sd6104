@@ -1181,64 +1181,28 @@ def main(args):
         return
     
     ##### PREPROCESSING ##### WANG YU
-    parser.add_argument("--process_violations", action="store_true", help="Expand and clean the Violations column.")
-    parser.add_argument("--violation_save_path", type=str, help="Path to save expanded violations CSV.")
-
     if args.process_violations:
-        print("🚨 Running preprocessing on 'Violations' column...")
-        violations_expanded_df = expand_violations(df, save_path=args.violation_save_path)
-
-
-    parser.add_argument("--fuzzy_clean_columns", action="store_true", help="Run fuzzy column normalization.")
-    parser.add_argument("--columns", nargs="+", help="List of column names to fuzzy clean.")
-    parser.add_argument("--threshold", type=int, default=80, help="Similarity threshold for fuzzy matching.")
-    parser.add_argument("--save_path", type=str, help="Path to save the cleaned file.")
+        console.log("Running preprocessing on violations column:")
+        violations_df = expand_violations(
+            df, save_path="data/Food_Inspections_Violations_Expanded.csv"
+        )
 
     if args.fuzzy_clean_columns:
-        print("🚀 Running fuzzy cleaning:")
-        df, grouped_info = fuzzy_clean_columns(
-            df=df,
-            columns_to_clean=args.columns,
-            threshold=args.threshold,
-            save_path=args.save_path
-    )
+        console.log("Running fuzzy cleaning:")
+        columns = args.columns if args.columns else []  # fallback if None
+        cleaned_df, grouped_info = fuzzy_clean_columns(
+            df, columns, save_path="Food_Inspections_Cleaned.csv"
+        )
 
-   
-    parser.add_argument("--input", type=str, required=True, help="Path to the input CSV or Excel file.")
-    parser.add_argument("--columns", nargs="+", required=True, help="List of columns to fuzzy clean.")
-    parser.add_argument("--threshold", type=int, default=80, help="Similarity threshold (default: 80).")
-    parser.add_argument("--save_path", type=str, help="Optional path to save the cleaned CSV.")
-    parser.add_argument("--fuzzy_clean_columns", action="store_true", help="Run fuzzy address cleaning.")
-
-    args = parser.parse_args()
-
-    ext = os.path.splitext(args.input)[1].lower()
-    if ext == ".csv":
-        df = pd.read_csv(args.input)
-    elif ext in [".xls", ".xlsx"]:
-        df = pd.read_excel(args.input)
-    else:
-        print(f"❌ Unsupported file format: {ext}")
-        return
 
     if args.fuzzy_clean_address:
-        print("🚀 Running fuzzy cleaning:")
+        console.log("🚀 Running fuzzy cleaning:")
         df, grouped_info = fuzzy_clean_address(
             df,
             columns_to_clean=args.columns,
             threshold=args.threshold,
-            save_path=args.save_path
+            save_path=args.save_path,
         )
-
-    parser = argparse.ArgumentParser(description="Analyze value patterns in a DataFrame column.")
-    parser.add_argument("--input", type=str, required=True, help="Path to the CSV or Excel file.")
-    parser.add_argument("--column", type=str, required=True, help="Column name to analyze.")
-    parser.add_argument("--analyze_column_patterns", action="store_true", help="Trigger column pattern analysis.")
-    parser.add_argument("--top_n", type=int, default=20, help="Number of top patterns to show.")
-    parser.add_argument("--show_pattern_index", nargs='*', type=int, help="Indices of patterns to show sample values for.")
-    parser.add_argument("--show_distinct", action="store_true", help="Show distinct values for each pattern.")
-
-    args = parser.parse_args()
 
     # Trigger analysis
     if args.analyze_column_patterns:
