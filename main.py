@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-
+from openpyxl.utils.exceptions import IllegalCharacterError
 from thefuzz import process, fuzz
 from collections import defaultdict
 import desbordante
@@ -24,7 +24,6 @@ from src.association_rule_mining import (
     clean_and_factorize_data,
     run_efficient_apriori_from_df,
 )
-from src.preprocess import preprocess
 from src.data_profiler import DataProfiler
 
 matplotlib.use("Agg")
@@ -39,15 +38,6 @@ def create_arg_parser():
     # Create the argument parser
     parser = argparse.ArgumentParser(
         description="Data preparation software for SD6104."
-    )
-
-    # Argument flag for preprocessing
-    parser.add_argument(
-        "-np",
-        "--no-preprocess",
-        action="store_true",
-        required=False,
-        help="Specify this flag to perform preprocessing on the dataset.",
     )
 
     # Argument flag for profilling
@@ -159,28 +149,6 @@ def create_arg_parser():
     )
 
     return parser
-
-
-def load_data():
-    file_path = "data/Food_Inspections_20250216.csv"
-    df = pd.read_csv(file_path, header=[0])
-    console.log(f"[bold green]SUCCESS[/bold green] File loaded from {file_path}")
-    console.log(df.head())
-
-    return df
-
-
-def save_data(df):
-    file_path = "data/Food_Inspections_20250216_preprocessed.parquet"
-
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-
-    # Save as Parquet
-    df.to_parquet(file_path, index=False)
-
-    console.log(f"[bold green]SUCCESS[/bold green] File persisted to {file_path}")
-
 
 def discover_fds(df):
     results = find_fds(df)
@@ -626,6 +594,98 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
     return df, all_grouped_labels
 
 
+
+
+def preprocess(df):
+
+    def fuzzy_normalize_column(df, column_name, threshold=80):
+        """
+        Normalize text values in a DataFrame column using fuzzy matching.
+        
+        Args:
+        - df (pd.DataFrame): Input DataFrame.
+        - column_name (str): Column name to normalize.
+        - threshold (int): Similarity threshold for fuzzy matching (default is 80).
+        
+        Returns:
+        - pd.DataFrame: DataFrame with a new normalized column.
+        """
+        df[column_name] = df[column_name].astype(str).fillna('')  # Convert to string
+
+        unique_values = list(set(df[column_name].str.lower()))  # Unique values in lowercase
+
+        # Reference mapping for normalization
+        reference_mapping = {}
+        groups = defaultdict(list)  # To store word clusters
+
+        for value in unique_values:
+            # Check if it's already in a group
+            if value in reference_mapping:
+                continue
+            
+            # Find similar words
+            matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
+            matches = [(match, score) for match, score in matches if score >= threshold]
+            
+            if matches:
+                best_match = max(matches, key=lambda x: x[1])[0]  # Pick the best-scoring match
+            else:
+                best_match = value  # Keep original if no good match found
+
+            # Assign all similar words to the best match
+            for match, score in matches:
+                reference_mapping[match] = best_match
+                groups[best_match].append(match)
+
+        # Apply normalization mapping
+        df[f'{column_name}'] = df[column_name].str.lower().map(reference_mapping)
+        
+        return df
+
+    # renaming column names to snake_case
+    COLUMN_NAMES = [
+        'inspection_id',
+        'dba_name',
+        'aka_name',
+        'license_',
+        'facility_type',
+        'risk',
+        'address',
+        'city',
+        'state',
+        'zip',
+        'inspection_date',
+        'inspection_type',
+        'results',
+        'violations',
+        'latitude',
+        'longitude',
+        'location'
+    ]
+
+    df.columns = COLUMN_NAMES
+
+    # drop irrelevant columns
+    df.drop(['inspection_id', 'aka_name', 'location'], axis=1, inplace=True)
+
+    # drop missing values
+    df.dropna(subset=['city', 'state', 'zip', 'latitude', 'longitude'], inplace=True)
+
+    # fix data type
+    df = df.astype({'zip':'Int64', 'license_':'Int64'})
+
+    # consolidate redundant values using fuzzy matching
+    df = fuzzy_normalize_column(df, 'inspection_type', threshold=80).drop(['inspection_type'],axis=1)
+
+    # drop columns after post processing 
+    df.drop(['state'], axis=1, inplace=True)
+
+    console.print("[bold green]SUCCESS[/bold green] File preprocessing completed.")
+    console.print(df.head())
+
+    return df
+
+
 def find_fds(df, algorithm_name="Default"):
     """
     Finds functional dependencies in a given DataFrame using a specified algorithm.
@@ -701,9 +761,7 @@ def find_inds(df: list[pd.DataFrame] | pd.DataFrame, algorithm_name: str = "Defa
 
         algo = algo_class()
         algo.load_data(tables=df)
-        algo.execute(
-            allow_duplicates=False,  # Ignore duplicate INDs
-        )
+        algo.execute()
 
         # Filter out self-dependencies
         return [
@@ -907,7 +965,11 @@ class InclusionDependencySet:
 
     def add_dependency(self, lhs: List[str], rhs: List[str]):
         """Adds a new functional dependency to the set."""
-        self.dependencies.append(InclusionDependency(lhs, rhs))
+
+        ind = InclusionDependency(lhs, rhs)
+
+        if ind not in self.dependencies:
+            self.dependencies.append(ind)
 
     def __len__(self):
         """Returns the number of functional dependencies."""
@@ -920,19 +982,11 @@ class InclusionDependencySet:
     def validate_ind(self, df):
         """Validates all inclusion dependencies in the dataset and displays the results."""
 
-        def ind_str(lhs, rhs):
-            def cc_str(cc):
-                (df, indices) = cc
-                columns = [df.columns[idx] for idx in indices]
-                return ", ".join(f"{col}" for col in columns)
+        for ind in self.dependencies:
+            lhs_idx = df.columns.get_indexer(ind.lhs)
+            rhs_idx = df.columns.get_indexer(ind.rhs)
 
-            return f"[{cc_str(lhs)}] -> [{cc_str(rhs)}]"
-
-        for fd in self.dependencies:
-            lhs_idx = df.columns.get_indexer(fd.lhs)
-            rhs_idx = df.columns.get_loc(fd.rhs)
-
-            console.log(f"Checking the IND {ind_str((df, lhs_idx), (df, rhs_idx))}")
+            console.log(f"Checking the IND: {df.columns[lhs_idx].to_list()} -> {df.columns[rhs_idx].to_list()}")
 
             if lhs_idx[0] == -1:
                 continue
@@ -952,19 +1006,11 @@ class InclusionDependencySet:
     def validate_aind(self, df):
         """Validates all approximate inclusion dependencies in the dataset and displays the results."""
 
-        def ind_str(lhs, rhs):
-            def cc_str(cc):
-                (df, indices) = cc
-                columns = [df.columns[idx] for idx in indices]
-                return ", ".join(f"{col}" for col in columns)
+        for ind in self.dependencies:
+            lhs_idx = df.columns.get_indexer(ind.lhs)
+            rhs_idx = df.columns.get_indexer(ind.rhs)
 
-            return f"[{cc_str(lhs)}] -> [{cc_str(rhs)}]"
-
-        for fd in self.dependencies:
-            lhs_idx = df.columns.get_indexer(fd.lhs)
-            rhs_idx = df.columns.get_loc(fd.rhs)
-
-            console.log(f"Checking the IND {ind_str((df, lhs_idx), (df, rhs_idx))}")
+            console.log(f"Checking the IND: {df.columns[lhs_idx].to_list()} -> {df.columns[rhs_idx].to_list()}")
 
             if lhs_idx[0] == -1:
                 continue
@@ -1008,13 +1054,6 @@ def convert_ind(ind: desbordante.ind.IND) -> Tuple[list, list]:
     rhs_matches = re.findall(pattern, rhs)
 
     return lhs_matches, rhs_matches
-
-
-import pandas as pd
-import os
-import matplotlib.pyplot as plt
-from openpyxl.utils.exceptions import IllegalCharacterError
-
 
 def detect_pattern(value):
     if pd.isna(value):
@@ -1200,34 +1239,38 @@ def main(args):
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
+        preprocessed_df = preprocess(df)
+
         if args.func_dependencies == "default":
             console.log("Running both Default Functional Dependences:")
-            fd_results = discover_fds(df)
+
+            fd_results = discover_fds(preprocessed_df)
 
         elif args.func_dependencies == "approximate":
             console.log("Running both Approximate Functional Dependences:")
-            afd_results = discover_afds(df=df, error=0.05)
+            afd_results = discover_afds(df=preprocessed_df, error=0.05)
 
         elif args.func_dependencies == "all":
             console.log("Running both Default and Approximate Functional Dependences:")
-            fd_results = discover_fds(df)
-            afd_results = discover_afds(df=df, error=0.05)
+            fd_results = discover_fds(preprocessed_df)
+            afd_results = discover_afds(df=preprocessed_df, error=0.05)
 
     ##### INCLUSION DEPENDENCIES #####
     if args.ind_dependencies:
+        preprocessed_df = preprocess(df)
 
         if args.ind_dependencies == "default":
             console.log("Running the Default Inclusion Dependences:")
-            run_ind(df)
+            run_ind(preprocessed_df)
 
         elif args.ind_dependencies == "approximate":
             console.log("Running Approximate Inclusion Dependences")
-            run_aind(df=df, error=0.2)
+            run_aind(df=preprocessed_df, error=0.2)
 
         elif args.ind_dependencies == "all":
             console.log("Running both Default and Approximate Inclusion Dependences:")
-            run_ind(df)
-            run_aind(df=df, error=0.2)
+            run_ind(preprocessed_df)
+            run_aind(df=preprocessed_df, error=0.2)
 
 
 if __name__ == "__main__":
