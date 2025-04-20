@@ -154,9 +154,6 @@ def create_arg_parser():
 
 def clean_and_factorize_data(df, columns_to_remove):
 
-    start_time = time.time()
-    
-    #df = pd.read_csv(input_csv)
     df.drop(columns=columns_to_remove, inplace=True, errors='ignore')
 
     mappings = {}
@@ -169,13 +166,13 @@ def clean_and_factorize_data(df, columns_to_remove):
     return df, mappings
 
 def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
+    
     transactions = [
         tuple(f"{col}={row[col]}" for col in df.columns if pd.notna(row[col]))
         for _, row in df.iterrows()
     ]
 
     print("\n⏳ Running efficient-apriori...")
-    start = time.time()
     itemsets, rules = apriori(transactions, min_support=min_support, min_confidence=min_confidence)
     print(f"✅ Apriori completed")
 
