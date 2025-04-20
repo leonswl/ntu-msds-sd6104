@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 from collections import defaultdict
+import string
 from typing import Optional, Union, Dict, List
 from openpyxl.utils.exceptions import IllegalCharacterError
 from thefuzz import process, fuzz
@@ -455,7 +456,7 @@ def single_profiling(df: pd.DataFrame,
     profiler = DataProfiler(df)
     profile_df = profiler.profile_dataframe(numeric_bins=numeric_bins)
     console.rule("[bold green]Column‑level profile[/bold green]")
-    console.console.log(profile_df)
+    console.log(profile_df)
 
     for col, row in profile_df.iterrows():
         fd_dist = row.get("first_digit_distribution", {})
