@@ -601,94 +601,36 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
 
     return df, all_grouped_labels
 
-def preprocess(df):
+def preprocess(df:pd.DataFrame)-> pd.DataFrame:
 
-    def fuzzy_normalize_column(df, column_name, threshold=80):
-        """
-        Normalize text values in a DataFrame column using fuzzy matching.
-        
-        Args:
-        - df (pd.DataFrame): Input DataFrame.
-        - column_name (str): Column name to normalize.
-        - threshold (int): Similarity threshold for fuzzy matching (default is 80).
-        
-        Returns:
-        - pd.DataFrame: DataFrame with a new normalized column.
-        """
-        df[column_name] = df[column_name].astype(str).fillna('')  # Convert to string
+    df_trim = df.drop(['Inspection ID', 'AKA Name', 'Address', 'State','Facility Type', 'City', 'Inspection Type', 'Location', 'raw_violation','violation_number','violation_comment', 'parse_error','error_reason'], axis=1)
 
-        unique_values = list(set(df[column_name].str.lower()))  # Unique values in lowercase
-
-        # Reference mapping for normalization
-        reference_mapping = {}
-        groups = defaultdict(list)  # To store word clusters
-
-        for value in unique_values:
-            # Check if it's already in a group
-            if value in reference_mapping:
-                continue
-            
-            # Find similar words
-            matches = process.extract(value, unique_values, limit=10, scorer=fuzz.ratio)
-            matches = [(match, score) for match, score in matches if score >= threshold]
-            
-            if matches:
-                best_match = max(matches, key=lambda x: x[1])[0]  # Pick the best-scoring match
-            else:
-                best_match = value  # Keep original if no good match found
-
-            # Assign all similar words to the best match
-            for match, score in matches:
-                reference_mapping[match] = best_match
-                groups[best_match].append(match)
-
-        # Apply normalization mapping
-        df[f'{column_name}'] = df[column_name].str.lower().map(reference_mapping)
-        
-        return df
+    #  renaming column names to snake_case
+    COLUMN_NAMES_MAPPING = {
+        'DBA Name':'dba_name',
+        'License #':'license_',
+        'Risk':'risk',
+        'Zip':'zip',
+        'Inspection Date':'inspection_date',
+        'Results':'results',
+        'Latitude':'latitude',
+        'Longitude':'longitude',
+        'violation_text':'violations',
+        'Facility Type_normalised':'facility_type',
+        'City_normalised':'city',
+        'Inspection Type_normalised':'inspection_type',
+        'Address_normalised':'address'
+    }
 
     # renaming column names to snake_case
-    COLUMN_NAMES = [
-        'inspection_id',
-        'dba_name',
-        'aka_name',
-        'license_',
-        'facility_type',
-        'risk',
-        'address',
-        'city',
-        'state',
-        'zip',
-        'inspection_date',
-        'inspection_type',
-        'results',
-        'violations',
-        'latitude',
-        'longitude',
-        'location'
-    ]
-
-    df.columns = COLUMN_NAMES
-
-    # drop irrelevant columns
-    df.drop(['inspection_id', 'aka_name', 'location'], axis=1, inplace=True)
-
-    # drop missing values
-    df.dropna(subset=['city', 'state', 'zip', 'latitude', 'longitude'], inplace=True)
+    df_trim = df_trim.rename(columns=COLUMN_NAMES_MAPPING)
 
     # fix data type
-    df = df.astype({'zip':'Int64', 'license_':'Int64'})
+    df_trim = df_trim.astype({'zip':'Int64', 'license_':'Int64'})
 
-    # consolidate redundant values using fuzzy matching
-    df = fuzzy_normalize_column(df, 'inspection_type', threshold=80).drop(['inspection_type'],axis=1)
+    console.log("[bold green]SUCCESS[/bold green] File preprocessing completed.")
 
-    # drop columns after post processing 
-    df.drop(['state'], axis=1, inplace=True)
-
-    console.print("[bold green]SUCCESS[/bold green] File preprocessing completed.")
-    console.print(df.head())
-
-    return df
+    return df_trim
 
 
 def find_fds(df, algorithm_name="Default"):
@@ -807,7 +749,7 @@ def find_ainds(
         algo.execute(
             max_lhs_size=2,  # Look for multi-column INDs
             allow_approximate=True,  # Enable approximate matches
-            error_threshold=error,  # Allow 20% violations
+            error_threshold=error,
         )
         # Filter out self-dependencies
         return [
@@ -1228,9 +1170,11 @@ def main(args):
     #### RULE MINING ##### EUGENE
     if args.rule_mining:
         console.log("Running Rule Mining")
-        
-        preprocessed_df = preprocess(df)
 
+        if is_none_or_empty(preprocessed_df):
+            console.log("Using the file input as the final dataframe for the specified tasks")
+            preprocessed_df = df.copy()
+        
         # Safely parse stringified list of column names
         columns_to_remove = ast.literal_eval(args.columns_to_remove)
 
@@ -1246,21 +1190,25 @@ def main(args):
 
     ##### FUNCTIONAL DEPENDENCIES #####
     if args.func_dependencies:
-        preprocessed_df = preprocess(df)
+        if is_none_or_empty(preprocessed_df):
+            console.log("Using the file input as the final dataframe for the specified tasks")
+            preprocessed_df = df.copy()
+
+        final_preprocessed_df = preprocess(preprocessed_df)
 
         if args.func_dependencies == "default":
             console.log("Running both Default Functional Dependences:")
 
-            fd_results = discover_fds(preprocessed_df)
+            fd_results = discover_fds(final_preprocessed_df)
 
         elif args.func_dependencies == "approximate":
             console.log("Running both Approximate Functional Dependences:")
-            afd_results = discover_afds(df=preprocessed_df, error=0.05)
+            afd_results = discover_afds(df=final_preprocessed_df, error=0.05)
 
         elif args.func_dependencies == "all":
             console.log("Running both Default and Approximate Functional Dependences:")
-            fd_results = discover_fds(preprocessed_df)
-            afd_results = discover_afds(df=preprocessed_df, error=0.05)
+            fd_results = discover_fds(final_preprocessed_df)
+            afd_results = discover_afds(df=final_preprocessed_df, error=0.05)
 
     ##### INCLUSION DEPENDENCIES #####
     if args.ind_dependencies:
@@ -1268,18 +1216,20 @@ def main(args):
             console.log("Using the file input as the final dataframe for the specified tasks")
             preprocessed_df = df.copy()
 
+        final_preprocessed_df = preprocess(preprocessed_df)
+
         if args.ind_dependencies == "default":
             console.log("Running the Default Inclusion Dependences:")
-            run_ind(preprocessed_df)
+            run_ind(final_preprocessed_df)
 
         elif args.ind_dependencies == "approximate":
             console.log("Running Approximate Inclusion Dependences")
-            run_aind(df=preprocessed_df, error=0.2)
+            run_aind(df=final_preprocessed_df, error=0.2)
 
         elif args.ind_dependencies == "all":
             console.log("Running both Default and Approximate Inclusion Dependences:")
-            run_ind(preprocessed_df)
-            run_aind(df=preprocessed_df, error=0.2)
+            run_ind(final_preprocessed_df)
+            run_aind(df=final_preprocessed_df, error=0.2)
 
 
 if __name__ == "__main__":
