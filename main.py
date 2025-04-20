@@ -275,7 +275,8 @@ def classify_data_class(value, column_name, id_value=None):
             class_type = "Quantity"
         elif re.fullmatch(r"[A-Za-z0-9]+", value_str) and re.search(r"[A-Za-z]", value_str) and re.search(r"\d", value_str):
             class_type = "Code/Identifier"
-        elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'’\"();:\[\]_-+/\\=<>$|{}\n\r]+", value_str):
+        # elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'’\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): (old line from wang yu)
+        elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): # selene changed this line
             class_type = "Text"
         elif len(value_str) > 0 and sum(c in string.printable for c in value_str) / len(value_str) > 0.6:
             class_type = "Text"
@@ -441,10 +442,15 @@ class DataProfiler:
         plt.xticks(rotation=45)
         plt.tight_layout()
 
-def single_profiling(df: pd.DataFrame, out_dir: str = "output/profile", numeric_bins: int = 10, top_n: int = 20, max_text_unique: int = 200) -> None:
+def single_profiling(df: pd.DataFrame,
+                     out_dir: str = "output/profile",
+                     numeric_bins: int = 10,
+                     top_n: int = 20,
+                     max_text_unique: int = 200) -> None:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
+    # Calling all single-profiling tasks:
     analyze_all_columns(df)
     profiler = DataProfiler(df)
     profile_df = profiler.profile_dataframe(numeric_bins=numeric_bins)
