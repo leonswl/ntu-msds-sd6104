@@ -42,6 +42,12 @@ def create_arg_parser():
         description="Data preparation software for SD6104."
     )
 
+    parser.add_argument(
+        "-p",
+        "--preprocess",
+        action="store_true"
+    )
+
     # Argument flag for profilling
     parser.add_argument(
         "-s",
@@ -112,21 +118,26 @@ def create_arg_parser():
         "--input", type=str, required=True, help="Path to the CSV or Excel file."
     )
 
-    parser.add_argument(
-        "--column", type=str, required=False, help="Column name to analyze."
-    )
+
+    # ARguments for analyze_column_patterns
     parser.add_argument(
         "--analyze_column_patterns",
         action="store_true",
         help="Trigger column pattern analysis.",
     )
+
+    parser.add_argument(
+        "--column", type=str, required=False, help="Column name to analyze."
+    )
+
     parser.add_argument(
         "--top_n", type=int, default=20, help="Number of top patterns to show."
     )
     parser.add_argument(
         "--show_pattern_index",
         nargs="*",
-        type=int,
+        default=[3,4,5,6],
+        type=list,
         help="Indices of patterns to show sample values for.",
     )
     parser.add_argument(
@@ -136,21 +147,16 @@ def create_arg_parser():
     )
 
     parser.add_argument(
-        "--process-violations",
-        action="store_true"
-    )
-
-    parser.add_argument(
-        "--fuzzy-clean-columns",
-        action="store_true"
-    )
-
-    parser.add_argument(
-        "--fuzzy-clean-address",
-        action="store_true"
+        "--fuzzy_threshold",
+        type=float,
+        default=99,
+        help="Threshold for fuzzy matching",
     )
 
     return parser
+
+def is_none_or_empty(df):
+    return df is None or df.empty
 
 def discover_fds(df):
     results = find_fds(df)
@@ -1173,6 +1179,7 @@ def analyze_column_patterns(
 
 def main(args):
 
+    #  Read file
     ext = os.path.splitext(args.input)[1].lower()
     if ext == ".csv":
         df = pd.read_csv(args.input)
@@ -1183,27 +1190,22 @@ def main(args):
         return
     
     ##### PREPROCESSING ##### WANG YU
-    if args.process_violations:
+    preprocessed_df = None
+    if args.preprocess:
+        columns = ['Facility Type','City' ,'Inspection Type']
+
         console.log("Running preprocessing on violations column:")
-        violations_df = expand_violations(
-            df, save_path="data/Food_Inspections_Violations_Expanded.csv"
-        )
+        violations_df = expand_violations(df)
 
-    if args.fuzzy_clean_columns:
         console.log("Running fuzzy cleaning:")
-        columns = args.columns if args.columns else []  # fallback if None
-        cleaned_df, grouped_info = fuzzy_clean_columns(
-            df, columns, save_path="Food_Inspections_Cleaned.csv"
-        )
+        cleaned_df, grouped_info = fuzzy_clean_columns(violations_df, columns, threshold=95)
 
-
-    if args.fuzzy_clean_address:
         console.log("🚀 Running fuzzy cleaning:")
-        df, grouped_info = fuzzy_clean_address(
-            df,
-            columns_to_clean=args.columns,
-            threshold=args.threshold,
-            save_path=args.save_path,
+        preprocessed_df, grouped_info = fuzzy_clean_address(
+            cleaned_df,
+            columns_to_clean=columns,
+            threshold=args.fuzzy_threshold,
+            save_path="data/Food_Inspections_Cleaned.csv"
         )
 
     # Trigger analysis
@@ -1219,18 +1221,24 @@ def main(args):
 
     #### SINGLE PROFILLING #####
     if args.single_profile:
-        single_profiling(df)
+        if is_none_or_empty(preprocessed_df):
+            console.log("Using the file input as the final dataframe for the specified tasks")
+            preprocessed_df = df.copy()
+
+        single_profiling(preprocessed_df)
         console.log("Running Single Profilling")
 
     #### RULE MINING ##### EUGENE
     if args.rule_mining:
         console.log("Running Rule Mining")
+        
+        preprocessed_df = preprocess(df)
 
         # Safely parse stringified list of column names
         columns_to_remove = ast.literal_eval(args.columns_to_remove)
 
         df_factorized, mappings = clean_and_factorize_data(
-            df, columns_to_remove=columns_to_remove
+            preprocessed_df, columns_to_remove=columns_to_remove
         )
 
         run_efficient_apriori_from_df(
@@ -1259,7 +1267,9 @@ def main(args):
 
     ##### INCLUSION DEPENDENCIES #####
     if args.ind_dependencies:
-        preprocessed_df = preprocess(df)
+        if is_none_or_empty(preprocessed_df):
+            console.log("Using the file input as the final dataframe for the specified tasks")
+            preprocessed_df = df.copy()
 
         if args.ind_dependencies == "default":
             console.log("Running the Default Inclusion Dependences:")
