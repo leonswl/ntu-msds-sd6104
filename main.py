@@ -38,6 +38,15 @@ def create_arg_parser():
         description="Data preparation software for SD6104."
     )
 
+
+    parser.add_argument(
+        "-i",
+        "--input", 
+        type=str, 
+        required=True, 
+        help="Path to the CSV or Excel file."
+    )
+
     parser.add_argument(
         "-p",
         "--preprocess",
@@ -86,9 +95,6 @@ def create_arg_parser():
         help="Specify the method for inclusion dependencies: 'default' or 'approximate'.",
     )
 
-    # Association Mining
-    parser.add_argument("--rule_mining", action="store_true", help="Run rule mining")
-
     parser.add_argument(
         "--columns_to_remove",
         type=str,
@@ -109,11 +115,6 @@ def create_arg_parser():
         default=0.6,
         help="Minimum confidence threshold for rule mining",
     )
-
-    parser.add_argument(
-        "--input", type=str, required=True, help="Path to the CSV or Excel file."
-    )
-
 
     # ARguments for analyze_column_patterns
     parser.add_argument(
