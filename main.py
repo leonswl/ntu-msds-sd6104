@@ -19,11 +19,7 @@ import desbordante
 import desbordante.fd.algorithms as fd_algorithms
 import desbordante.afd.algorithms as afd_algorithms
 import desbordante.ind.algorithms as ind_algorithms
-
-from src.association_rule_mining import (
-    clean_and_factorize_data,
-    run_efficient_apriori_from_df,
-)
+from efficient_apriori import apriori
 from src.data_profiler import DataProfiler
 
 matplotlib.use("Agg")
@@ -154,6 +150,61 @@ def create_arg_parser():
     )
 
     return parser
+
+def clean_and_factorize_data(df, columns_to_remove):
+
+    start_time = time.time()
+    
+    #df = pd.read_csv(input_csv)
+    df.drop(columns=columns_to_remove, inplace=True, errors='ignore')
+
+    mappings = {}
+    for col in df.columns:
+        codes, uniques = pd.factorize(df[col])
+        df[col] = codes
+        mappings[col] = dict(enumerate(uniques))
+
+    print(f"✅ Factorization complete")
+    return df, mappings
+
+def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
+    transactions = [
+        tuple(f"{col}={row[col]}" for col in df.columns if pd.notna(row[col]))
+        for _, row in df.iterrows()
+    ]
+
+    print("\n⏳ Running efficient-apriori...")
+    start = time.time()
+    itemsets, rules = apriori(transactions, min_support=min_support, min_confidence=min_confidence)
+    print(f"✅ Apriori completed")
+
+    # Frequent itemsets
+    itemset_rows = []
+    for k, itemset_dict in itemsets.items():
+        for items, support in itemset_dict.items():
+            itemset_rows.append({
+                'itemsets': frozenset(items),
+                'support': support
+            })
+    frequent_itemsets_df = pd.DataFrame(itemset_rows).sort_values(by='support', ascending=False)
+    print("\nFrequent Itemsets (Top 30):")
+    print(frequent_itemsets_df.head(30))
+
+    # Association rules
+    rules_rows = []
+    for rule in rules:
+        rules_rows.append({
+            'antecedents': frozenset(rule.lhs),
+            'consequents': frozenset(rule.rhs),
+            'support': rule.support,
+            'confidence': rule.confidence,
+            'lift': rule.lift
+        })
+    rules_df = pd.DataFrame(rules_rows).sort_values(by=['confidence', 'support'], ascending=[False, False])
+    print("\nAssociation Rules (Top 30 by Confidence (with Support as Tie-Breaker)):")
+    print(rules_df.head(30))
+
+    return frequent_itemsets_df, rules_df
 
 def is_none_or_empty(df):
     return df is None or df.empty

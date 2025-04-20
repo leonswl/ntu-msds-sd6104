@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 from efficient_apriori import apriori
-import time
 
 def clean_and_factorize_data(df, columns_to_remove):
 
@@ -16,8 +15,7 @@ def clean_and_factorize_data(df, columns_to_remove):
         df[col] = codes
         mappings[col] = dict(enumerate(uniques))
 
-    end_time = time.time()
-    print(f"✅ Factorization complete. Time taken: {end_time - start_time:.2f} seconds.")
+    print(f"✅ Factorization complete")
     return df, mappings
 
 def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
@@ -29,8 +27,7 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
     print("\n⏳ Running efficient-apriori...")
     start = time.time()
     itemsets, rules = apriori(transactions, min_support=min_support, min_confidence=min_confidence)
-    end = time.time()
-    print(f"✅ Apriori completed. Time taken: {end - start:.2f} seconds.")
+    print(f"✅ Apriori completed")
 
     # Frequent itemsets
     itemset_rows = []
