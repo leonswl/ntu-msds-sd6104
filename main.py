@@ -441,12 +441,6 @@ class DataProfiler:
         plt.xticks(rotation=45)
         plt.tight_layout()
 
-def create_arg_parser():
-    parser = argparse.ArgumentParser(description="Data preparation software for SD6104.")
-    parser.add_argument("-i", "--input", required=True, help="Input CSV/XLSX file path")
-    parser.add_argument("-s", "--single-profile", action="store_true", help="Perform single-column profiling")
-    return parser
-
 def single_profiling(df: pd.DataFrame, out_dir: str = "output/profile", numeric_bins: int = 10, top_n: int = 20, max_text_unique: int = 200) -> None:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
