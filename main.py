@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from collections import defaultdict
+from typing import Optional, Union, Dict, List
 from openpyxl.utils.exceptions import IllegalCharacterError
 from thefuzz import process, fuzz
 from collections import defaultdict
@@ -31,6 +33,7 @@ pd.set_option("display.max_colwidth", None)
 pd.set_option("display.max_colwidth", None)
 
 console = Console()
+
 
 
 def create_arg_parser():
@@ -254,76 +257,235 @@ def run_aind(df, error):
     ind_set.validate_aind(df)
 
 
-def single_profiling(
-    df: pd.DataFrame,
-    out_dir: str = "output/profile",
-    numeric_bins: int = 10,
-    top_n: int = 20,
-    max_text_unique: int = 200,
-) -> None:
-    """
-    • console.logs a DataFrame with column‑level metrics (no CSV written)
-    • Saves a first‑digit bar chart for every *numeric* column
-    • Saves two bar charts for every *text* column:
-        - full range  (only if #unique ≤ max_text_unique)
-        - top-N + 'Others'
-    All PNGs land in *out_dir* (created if missing).
-    """
+# Data Classifier Functions
+all_column_counts = defaultdict(lambda: defaultdict(int))
+all_column_examples = defaultdict(lambda: defaultdict(list))
+MAX_EXAMPLES = 5
 
+def classify_data_class(value, column_name, id_value=None):
+    if pd.isna(value):
+        class_type = "Missing"
+        value_str = "NaN"
+    else:
+        value_str = str(value).strip()
+
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value_str) or re.fullmatch(r"\d{1,2}/\d{1,2}/\d{4}", value_str):
+            class_type = "Date/Time"
+        elif re.fullmatch(r"\d+(\.\d+)?", value_str):
+            class_type = "Quantity"
+        elif re.fullmatch(r"[A-Za-z0-9]+", value_str) and re.search(r"[A-Za-z]", value_str) and re.search(r"\d", value_str):
+            class_type = "Code/Identifier"
+        elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'’\"();:\[\]_-+/\\=<>$|{}\n\r]+", value_str):
+            class_type = "Text"
+        elif len(value_str) > 0 and sum(c in string.printable for c in value_str) / len(value_str) > 0.6:
+            class_type = "Text"
+        else:
+            class_type = "Other"
+
+    all_column_counts[column_name][class_type] += 1
+
+    if len(all_column_examples[column_name][class_type]) < MAX_EXAMPLES and id_value is not None:
+        all_column_examples[column_name][class_type].append((id_value, value_str))
+
+    return class_type
+
+def analyze_all_columns(df, max_examples=5, id_column="Inspection ID"):
+    all_column_counts.clear()
+    all_column_examples.clear()
+
+    for column in df.columns:
+        for idx, val in df[column].items():
+            id_val = df.at[idx, id_column] if id_column in df.columns else idx
+            classify_data_class(val, column, id_val)
+
+    print("Data Class Summary for All Columns:\n")
+    for col, class_dict in all_column_counts.items():
+        print(f" Column: '{col}'")
+        for class_name, count in class_dict.items():
+            print(f"  - {class_name} ({count} total):")
+            for id_val, example in all_column_examples[col][class_name]:
+                print(f"     • [Inspection ID {id_val}] {example}")
+        print("")
+    return all_column_counts
+
+
+class DataProfiler:
+    def __init__(self, df: pd.DataFrame):
+        self.df: pd.DataFrame = df.copy()
+        self.column_profiles: Dict[str, Dict[str, Union[int, float, dict]]] = {}
+
+    def profile_column(self, col: str, numeric_bins: int = 10) -> Dict[str, Union[int, float, dict]]:
+        s = self.df[col]
+        num_rows = len(s)
+        profile: Dict[str, Union[int, float, dict]] = {
+            "num_rows": num_rows,
+            "null_count": s.isna().sum(),
+        }
+        profile["null_pct"] = profile["null_count"] / num_rows if num_rows else np.nan
+        profile["distinct_count"] = s.nunique(dropna=False)
+        profile["uniqueness"] = profile["distinct_count"] / num_rows if num_rows else np.nan
+        most_freq = s.value_counts(dropna=False).iloc[0] if num_rows else 0
+        profile["constancy"] = most_freq / num_rows if num_rows else np.nan
+
+        numeric = pd.to_numeric(s, errors="coerce")
+        is_numeric = (numeric.notna().sum() / num_rows) > 0.9 if num_rows else False
+
+        if is_numeric:
+            profile["quartiles"] = numeric.quantile([0.25, 0.5, 0.75]).to_dict()
+            profile.update(self._numeric_histograms(s, bins=numeric_bins))
+            profile["first_digit_distribution"] = self._first_digit_distribution(numeric).to_dict()
+        else:
+            profile.update(self._length_metrics(s))
+            profile["histogram"] = s.value_counts(dropna=False).to_dict()
+
+        self.column_profiles[col] = profile
+        return profile
+
+    def profile_dataframe(self, numeric_bins: int = 10) -> pd.DataFrame:
+        for col in self.df.columns:
+            self.profile_column(col, numeric_bins=numeric_bins)
+        return pd.DataFrame(self.column_profiles).T
+
+    @staticmethod
+    def _first_digit_distribution(series: pd.Series) -> pd.Series:
+        s = series.dropna()
+        if s.empty:
+            return pd.Series(dtype=float)
+        first_digits: List[str] = []
+        for val in s.astype(str):
+            val = val.lstrip(" -+0")
+            if val and val[0].isdigit():
+                first_digits.append(val[0])
+        if not first_digits:
+            return pd.Series(dtype=float)
+        counts = pd.Series(first_digits).value_counts(sort=False).sort_index()
+        return counts / counts.sum()
+
+    @staticmethod
+    def _numeric_histograms(series: pd.Series, bins: int = 10) -> Dict[str, Union[dict, str]]:
+        numeric = pd.to_numeric(series, errors="coerce").dropna()
+        if numeric.empty:
+            return {}
+        counts, edges = np.histogram(numeric, bins=bins)
+        equi_width = {"bin_edges": edges.tolist(), "counts": counts.tolist()}
+        try:
+            labels = [f"bin_{i+1}" for i in range(bins)]
+            q = pd.qcut(numeric, q=bins, labels=labels)
+            equi_depth = q.value_counts().to_dict()
+        except ValueError:
+            equi_depth = "Insufficient numeric variety for qcut."
+        return {"histogram_equi_width": equi_width, "histogram_equi_depth": equi_depth}
+
+    @staticmethod
+    def _length_metrics(series: pd.Series) -> Dict[str, float]:
+        lengths = series.dropna().astype(str).apply(len)
+        if lengths.empty:
+            return {"length_min": np.nan, "length_max": np.nan, "length_median": np.nan, "length_mean": np.nan}
+        return {
+            "length_min": lengths.min(),
+            "length_max": lengths.max(),
+            "length_median": lengths.median(),
+            "length_mean": lengths.mean(),
+        }
+
+    def plot_first_digit(self, col: str, ax: Optional[plt.Axes] = None) -> None:
+        if col not in self.column_profiles:
+            self.profile_column(col)
+        dist = self.column_profiles[col].get("first_digit_distribution", {})
+        if not dist:
+            raise ValueError(f"Column '{col}' has no numeric first-digit distribution to plot.")
+        series = pd.Series(dist).reindex([str(i) for i in range(1, 10)])
+        ax = ax or plt.gca()
+        series.plot(kind="bar", color="skyblue", ax=ax)
+        ax.set_title(f"First-Digit Distribution – {col}")
+        ax.set_xlabel("Digit")
+        ax.set_ylabel("Proportion")
+        for x, y in enumerate(series.values):
+            ax.text(x, y + 0.001, f"{y:.2f}", ha="center")
+        ax.set_ylim(0, series.max() * 1.1)
+        plt.tight_layout()
+
+    def plot_text_frequency(self, col: str, top_n: int = 20, show_pct: bool = True, ax: Optional[plt.Axes] = None) -> None:
+        s = self.df[col].astype(str).fillna("<NA>")
+        counts = s.value_counts()
+        total = counts.sum()
+        if len(counts) > top_n:
+            top = counts.iloc[:top_n]
+            others_count = counts.iloc[top_n:].sum()
+            counts = pd.concat([top, pd.Series({"Others": others_count})])
+        counts = counts.sort_values(ascending=False)
+        ax = ax or plt.gca()
+        counts.plot(kind="bar", color="steelblue", ax=ax)
+        ax.set_title(f"Top {top_n} categories – {col}")
+        ax.set_xlabel(col)
+        ylabel = "Percentage" if show_pct else "Count"
+        if show_pct:
+            pct = (counts / total * 100).round(2)
+            ax.set_ylabel("Percentage")
+            ax.bar_label(ax.containers[0], labels=[f"{p}%" for p in pct])
+        else:
+            ax.set_ylabel("Count")
+        plt.xticks(rotation=80, ha="right")
+        plt.tight_layout()
+
+    def plot_time_counts(self, col: str, freq: str = "Y", ax: Optional[plt.Axes] = None) -> None:
+        dates = pd.to_datetime(self.df[col], errors="coerce")
+        if dates.isna().all():
+            raise ValueError(f"Column '{col}' could not be parsed as datetime.")
+        counts = dates.dt.to_period(freq).value_counts().sort_index()
+        ax = ax or plt.gca()
+        counts.plot(kind="line", marker="o", ax=ax)
+        ax.set_title(f"Record count by {freq} – {col}")
+        ax.set_xlabel("Period")
+        ax.set_ylabel("Count")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+
+def create_arg_parser():
+    parser = argparse.ArgumentParser(description="Data preparation software for SD6104.")
+    parser.add_argument("-i", "--input", required=True, help="Input CSV/XLSX file path")
+    parser.add_argument("-s", "--single-profile", action="store_true", help="Perform single-column profiling")
+    return parser
+
+def single_profiling(df: pd.DataFrame, out_dir: str = "output/profile", numeric_bins: int = 10, top_n: int = 20, max_text_unique: int = 200) -> None:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
+    analyze_all_columns(df)
     profiler = DataProfiler(df)
-
-    # Profile table – console.log via Rich
     profile_df = profiler.profile_dataframe(numeric_bins=numeric_bins)
     console.rule("[bold green]Column‑level profile[/bold green]")
     console.console.log(profile_df)
 
-    # Numeric columns – first‑digit plots
     for col, row in profile_df.iterrows():
         fd_dist = row.get("first_digit_distribution", {})
         if isinstance(fd_dist, dict) and fd_dist:
             plt.figure(figsize=(5, 3))
             profiler.plot_first_digit(col)
-            plt.savefig(
-                out_path / f"{col}_first_digit.png", dpi=150, bbox_inches="tight"
-            )
+            plt.savefig(out_path / f"{col}_first_digit.png", dpi=150, bbox_inches="tight")
             plt.close()
             console.log(f"   • First‑digit plot saved for '{col}'")
 
-    # Text columns – frequency plots
     for col in df.columns:
-        # Skip numeric columns already handled
         if col in profile_df and profile_df.loc[col].get("first_digit_distribution"):
             continue
-
         unique_vals = int(profile_df.loc[col, "distinct_count"])
         if unique_vals == 0:
             continue
-
-        # 3a. full‑range plot (only if reasonable)
         if unique_vals <= max_text_unique:
             plt.figure(figsize=(max(6, unique_vals * 0.25), 4))
             profiler.plot_text_frequency(col, top_n=unique_vals, show_pct=False)
             plt.savefig(out_path / f"{col}_full.png", dpi=150, bbox_inches="tight")
             plt.close()
-            console.log(
-                f"   • Full‑range plot saved for '{col}' "
-                f"({unique_vals} unique values)"
-            )
+            console.log(f"   • Full‑range plot saved for '{col}' ({unique_vals} unique values)")
         else:
-            console.log(
-                f"   • Skipped full‑range plot for '{col}' "
-                f"({unique_vals} unique > {max_text_unique})"
-            )
-
-        # 3b. top‑N (+ Others) plot – always
+            console.log(f"   • Skipped full‑range plot for '{col}' ({unique_vals} unique > {max_text_unique})")
         plt.figure(figsize=(10, 4))
         profiler.plot_text_frequency(col, top_n=top_n, show_pct=False)
         plt.savefig(out_path / f"{col}_top{top_n}.png", dpi=150, bbox_inches="tight")
         plt.close()
         console.log(f"   • Top‑{top_n} plot saved for '{col}'")
+
 
 
 def expand_violations(df, save_path=None):
