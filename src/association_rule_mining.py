@@ -41,8 +41,8 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
                 'support': support
             })
     frequent_itemsets_df = pd.DataFrame(itemset_rows).sort_values(by='support', ascending=False)
-    print("\nFrequent Itemsets (Top 10):")
-    print(frequent_itemsets_df.head(10))
+    print("\nFrequent Itemsets (Top 30):")
+    print(frequent_itemsets_df.head(30))
 
     # Association rules
     rules_rows = []
@@ -54,9 +54,9 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
             'confidence': rule.confidence,
             'lift': rule.lift
         })
-    rules_df = pd.DataFrame(rules_rows).sort_values(by='confidence', ascending=False)
-    print("\nAssociation Rules (Top 10 by Confidence):")
-    print(rules_df.head(10))
+    rules_df = pd.DataFrame(rules_rows).sort_values(by=['confidence', 'support'], ascending=[False, False])
+    print("\nAssociation Rules (Top 30 by Confidence (with Support as Tie-Breaker)):")
+    print(rules_df.head(30))
 
     return frequent_itemsets_df, rules_df
 

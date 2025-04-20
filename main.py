@@ -27,6 +27,8 @@ from src.association_rule_mining import (
 from src.data_profiler import DataProfiler
 
 matplotlib.use("Agg")
+pd.set_option("display.max_colwidth", None)
+pd.set_option("display.max_colwidth", None)
 
 console = Console()
 
