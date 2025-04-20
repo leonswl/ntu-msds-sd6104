@@ -102,7 +102,7 @@ def create_arg_parser():
     parser.add_argument(
         "--columns_to_remove",
         type=str,
-        default=['Inspection ID', 'AKA Name', 'Facility Type', 'City', 'State', 'Inspection Type', 'Latitude', 'Longtitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'City_normalised', 'Address'],
+        default="['Inspection ID', 'AKA Name', 'Facility Type', 'City', 'State', 'Inspection Type', 'Latitude', 'Longtitude', 'raw_violation', 'violation_comment', 'parse_error', 'error_reason', 'City_normalised', 'Address']",
         help="Stringified list of column names to remove",
     )
 
