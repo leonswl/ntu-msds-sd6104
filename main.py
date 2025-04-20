@@ -799,6 +799,7 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
         df = fuzzy_normalize_column(df, col, threshold)
 
     if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         df.to_csv(save_path, index=False)
         console.log(f"\n✅ Cleaned data saved as: {save_path}")
 
