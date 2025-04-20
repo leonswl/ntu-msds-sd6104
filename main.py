@@ -601,9 +601,6 @@ def fuzzy_clean_address(df, columns_to_clean, threshold=80, save_path=None):
 
     return df, all_grouped_labels
 
-
-
-
 def preprocess(df):
 
     def fuzzy_normalize_column(df, column_name, threshold=80):
@@ -1203,7 +1200,7 @@ def main(args):
         console.log("🚀 Running fuzzy cleaning:")
         preprocessed_df, grouped_info = fuzzy_clean_address(
             cleaned_df,
-            columns_to_clean=columns,
+            columns_to_clean=['Address'],
             threshold=args.fuzzy_threshold,
             save_path="data/Food_Inspections_Cleaned.csv"
         )
