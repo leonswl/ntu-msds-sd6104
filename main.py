@@ -381,13 +381,19 @@ class DataProfiler:
         most_freq = s.value_counts(dropna=False).iloc[0] if num_rows else 0
         profile["constancy"] = most_freq / num_rows if num_rows else np.nan
 
+        #
         numeric = pd.to_numeric(s, errors="coerce")
+        numeric_clean = numeric.dropna()
         is_numeric = (numeric.notna().sum() / num_rows) > 0.9 if num_rows else False
 
         if is_numeric:
-            profile["quartiles"] = numeric.quantile([0.25, 0.5, 0.75]).to_dict()
-            profile.update(self._numeric_histograms(s, bins=numeric_bins))
-            profile["first_digit_distribution"] = self._first_digit_distribution(numeric).to_dict()
+            try:
+                profile["quartiles"] = numeric_clean.quantile([0.25, 0.5, 0.75]).to_dict()
+            except Exception as e:
+                profile["quartiles"] = {"error": f"Could not compute quartiles: {e}"}
+        
+            profile.update(self._numeric_histograms(numeric_clean, bins=numeric_bins))
+            profile["first_digit_distribution"] = self._first_digit_distribution(numeric_clean).to_dict()
         else:
             profile.update(self._length_metrics(s))
             profile["histogram"] = s.value_counts(dropna=False).to_dict()
@@ -446,8 +452,10 @@ class DataProfiler:
         if col not in self.column_profiles:
             self.profile_column(col)
         dist = self.column_profiles[col].get("first_digit_distribution", {})
+
         if not dist:
             raise ValueError(f"Column '{col}' has no numeric first-digit distribution to plot.")
+        
         series = pd.Series(dist).reindex([str(i) for i in range(1, 10)])
         ax = ax or plt.gca()
         series.plot(kind="bar", color="skyblue", ax=ax)
