@@ -3,8 +3,10 @@ import argparse
 from pathlib import Path
 import re
 import ast
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field
+from collections import defaultdict
+import string
 
 
 from rich.console import Console
@@ -12,18 +14,13 @@ import pandas as pd
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from collections import defaultdict
-import string
-from typing import Optional, Union, Dict, List
 from openpyxl.utils.exceptions import IllegalCharacterError
 from thefuzz import process, fuzz
-from collections import defaultdict
 import desbordante
 import desbordante.fd.algorithms as fd_algorithms
 import desbordante.afd.algorithms as afd_algorithms
 import desbordante.ind.algorithms as ind_algorithms
 from efficient_apriori import apriori
-from src.data_profiler import DataProfiler
 
 matplotlib.use("Agg")
 pd.set_option("display.max_colwidth", None)
@@ -37,11 +34,11 @@ def create_arg_parser():
     """
     Creates and returns an argument parser.
     """
+
     # Create the argument parser
     parser = argparse.ArgumentParser(
         description="Data preparation software for SD6104."
     )
-
 
     parser.add_argument(
         "-i",
@@ -166,7 +163,7 @@ def clean_and_factorize_data(df, columns_to_remove):
         df[col] = codes
         mappings[col] = dict(enumerate(uniques))
 
-    print(f"✅ Factorization complete")
+    console.log(f"✅ Factorization complete")
     return df, mappings
 
 def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
@@ -176,9 +173,9 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
         for _, row in df.iterrows()
     ]
 
-    print("\n⏳ Running efficient-apriori...")
+    console.log("\n⏳ Running efficient-apriori...")
     itemsets, rules = apriori(transactions, min_support=min_support, min_confidence=min_confidence)
-    print(f"✅ Apriori completed")
+    console.log(f"✅ Apriori completed")
 
     # Frequent itemsets
     itemset_rows = []
@@ -189,8 +186,8 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
                 'support': support
             })
     frequent_itemsets_df = pd.DataFrame(itemset_rows).sort_values(by='support', ascending=False)
-    print("\nFrequent Itemsets (Top 30):")
-    print(frequent_itemsets_df.head(30))
+    console.log("\nFrequent Itemsets (Top 30):")
+    console.log(frequent_itemsets_df.head(30))
 
     # Association rules
     rules_rows = []
@@ -203,8 +200,8 @@ def run_efficient_apriori_from_df(df, min_support=0.05, min_confidence=0.6):
             'lift': rule.lift
         })
     rules_df = pd.DataFrame(rules_rows).sort_values(by=['confidence', 'support'], ascending=[False, False])
-    print("\nAssociation Rules (Top 30 by Confidence (with Support as Tie-Breaker)):")
-    print(rules_df.head(30))
+    console.log("\nAssociation Rules (Top 30 by Confidence (with Support as Tie-Breaker)):")
+    console.log(rules_df.head(30))
 
     return frequent_itemsets_df, rules_df
 
@@ -334,7 +331,7 @@ def classify_data_class(value, column_name, id_value=None):
         # elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'’\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): (old line from wang yu)
         elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): # selene changed this line
             class_type = "Text"
-        elif len(value_str) > 0 and sum(c in string.printable for c in value_str) / len(value_str) > 0.6:
+        elif len(value_str) > 0 and sum(c in string.console.logable for c in value_str) / len(value_str) > 0.6:
             class_type = "Text"
         else:
             class_type = "Other"
@@ -355,14 +352,14 @@ def analyze_all_columns(df, max_examples=5, id_column="Inspection ID"):
             id_val = df.at[idx, id_column] if id_column in df.columns else idx
             classify_data_class(val, column, id_val)
 
-    print("Data Class Summary for All Columns:\n")
+    console.log("Data Class Summary for All Columns:\n")
     for col, class_dict in all_column_counts.items():
-        print(f" Column: '{col}'")
+        console.log(f" Column: '{col}'")
         for class_name, count in class_dict.items():
-            print(f"  - {class_name} ({count} total):")
+            console.log(f"  - {class_name} ({count} total):")
             for id_val, example in all_column_examples[col][class_name]:
-                print(f"     • [Inspection ID {id_val}] {example}")
-        print("")
+                console.log(f"     • [Inspection ID {id_val}] {example}")
+        console.log("")
     return all_column_counts
 
 
