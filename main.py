@@ -331,7 +331,7 @@ def classify_data_class(value, column_name, id_value=None):
         # elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'’\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): (old line from wang yu)
         elif re.fullmatch(r"[A-Za-z0-9\s.,!?&@#%*'\"();:\[\]_\-+/\\=<>$|{}\n\r]+", value_str): # selene changed this line
             class_type = "Text"
-        elif len(value_str) > 0 and sum(c in string.console.logable for c in value_str) / len(value_str) > 0.6:
+        elif len(value_str) > 0 and sum(c in string.printable for c in value_str) / len(value_str) > 0.6:
             class_type = "Text"
         else:
             class_type = "Other"
